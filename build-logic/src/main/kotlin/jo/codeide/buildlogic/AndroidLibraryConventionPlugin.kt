@@ -75,8 +75,11 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
             // Robolectric doit refléter les internes du JDK récent (JPMS) ;
             // voir docs/ENVIRONNEMENT.md et l'issue robolectric/robolectric#11434.
+            // Tas borné : la machine CI n'a que 4 Go et les JVM de test
+            // se succèdent séquentiellement (voir gradle.properties).
             tasks.withType<Test>().configureEach {
                 jvmArgs("--add-exports", "java.base/jdk.internal.access=ALL-UNNAMED")
+                maxHeapSize = "640m"
             }
         }
     }

@@ -43,6 +43,8 @@ class KotlinLibraryConventionPlugin : Plugin<Project> {
 
             tasks.withType<Test>().configureEach {
                 useJUnit()
+                // Tas borné pour la machine CI (4 Go) — voir gradle.properties.
+                maxHeapSize = "640m"
             }
 
             dependencies.add(

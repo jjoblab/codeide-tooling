@@ -84,8 +84,11 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             configurerDetekt()
             configurerSpotless()
 
+            // Robolectric doit refléter les internes du JDK récent (JPMS) ;
+            // voir docs/ENVIRONNEMENT.md. Tas borné pour la machine CI (4 Go).
             tasks.withType<Test>().configureEach {
                 jvmArgs("--add-exports", "java.base/jdk.internal.access=ALL-UNNAMED")
+                maxHeapSize = "640m"
             }
         }
     }

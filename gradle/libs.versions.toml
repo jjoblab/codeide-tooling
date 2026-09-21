@@ -65,6 +65,10 @@ dokka = "2.2.0"
 # Divers.
 javax-inject = "1"
 
+# Interface ViewBinding pour core:ui (même version que l'AGP, vérifié sur Google Maven ;
+# AGP l'ajoute automatiquement aux modules qui activent viewBinding, core:ui la déclare explicitement).
+viewbinding = "9.4.1"
+
 [libraries]
 # AndroidX de base.
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidx-annotation" }
@@ -99,6 +103,10 @@ room-compiler = { group = "androidx.room", name = "room-compiler", version.ref =
 javax-inject = { group = "javax.inject", name = "javax.inject", version.ref = "javax-inject" }
 hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref = "hilt" }
 hilt-compiler = { group = "com.google.dagger", name = "hilt-compiler", version.ref = "hilt" }
+hilt-android-testing = { group = "com.google.dagger", name = "hilt-android-testing", version.ref = "hilt" }
+
+# Interface ViewBinding (BaseFragment de core:ui ; suit la version de l'AGP).
+androidx-viewbinding = { group = "androidx.databinding", name = "viewbinding", version.ref = "viewbinding" }
 
 # Kotlin.
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
