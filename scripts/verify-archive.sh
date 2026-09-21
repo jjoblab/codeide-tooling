@@ -8,6 +8,10 @@
 
 set -euo pipefail
 
+# Comparaisons d'octets (liste de fichiers zip incluant des noms d'objets git
+# non UTF-8) : sans ceci, grep -x peut échouer selon la locale.
+export LC_ALL=C
+
 # ---------------------------------------------------------------------------
 # Paramètres.
 # ---------------------------------------------------------------------------
@@ -32,10 +36,16 @@ echo "[verify-archive] archive intègre"
 # 2. Fichiers interdits (section 9.3 : exclusions).
 # ---------------------------------------------------------------------------
 echo "[verify-archive] contrôle des exclusions…"
-interdits=$(unzip -Z1 "$archive" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|\.iml$|\.keystore$|\.jks$|\.DS_Store$' || true)
-if [ -n "$interdits" ]; then
+# ---------------------------------------------------------------------------
+# Listing capturé une fois (NB : ne pas sonder `unzip` via un pipe vers
+# `grep -q` — grep sort à la première correspondance, unzip reçoit SIGPIPE et
+# pipefail fait échouer le pipeline de façon non déterministe).
+# ---------------------------------------------------------------------------
+listing=$(unzip -Z1 "$archive")
+
+if [ -n "$(printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|\.iml$|\.keystore$|\.jks$|\.DS_Store$' || true)" ]; then
     echo "ERREUR : fichiers interdits dans l'archive :" >&2
-    echo "$interdits" >&2
+    printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|\.iml$|\.keystore$|\.jks$|\.DS_Store$' >&2 || true
     exit 1
 fi
 echo "[verify-archive] aucun fichier interdit"
@@ -45,10 +55,10 @@ echo "[verify-archive] aucun fichier interdit"
 # ---------------------------------------------------------------------------
 echo "[verify-archive] contrôle du contenu obligatoire…"
 for obligatoire in gradlew gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties build-logic/build.gradle.kts settings.gradle.kts version.properties; do
-    unzip -Z1 "$archive" | grep -qx "$obligatoire" || {
+    if ! printf '%s\n' "$listing" | grep -x "$obligatoire" >/dev/null; then
         echo "ERREUR : $obligatoire manquant dans l'archive" >&2
         exit 1
-    }
+    fi
 done
 echo "[verify-archive] contenu obligatoire présent"
 
