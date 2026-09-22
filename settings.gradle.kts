@@ -43,3 +43,6 @@ include(":feature:newproject")
 include(":feature:settings")
 include(":feature:diagnostics")
 include(":feature:editor")
+
+// Outils (hors application — étape 9, ADR 0019 : harnais de vérification).
+include(":tools:generateur")

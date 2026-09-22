@@ -61,10 +61,16 @@ internal fun Project.configurerDetekt() {
     detekt.buildUponDefaultConfig = true
     val base = rootDir.resolve("config/detekt/detekt.yml")
     val exemtes = setOf(":core:logging", ":core:crash")
-    if (path in exemtes) {
-        detekt.config.setFrom(base, rootDir.resolve("config/detekt/detekt-journalisation-autorisee.yml"))
-    } else {
-        detekt.config.setFrom(base)
+    val outilConsole = setOf(":tools:generateur")
+    when {
+        path in exemtes ->
+            detekt.config.setFrom(base, rootDir.resolve("config/detekt/detekt-journalisation-autorisee.yml"))
+        // Outil CLI (ADR 0019) : sa sortie standard est le résultat, pas
+        // une journalisation — exemption documentée, rien d'autre n'est levé.
+        path in outilConsole ->
+            detekt.config.setFrom(base, rootDir.resolve("config/detekt/detekt-sortie-console-autorisee.yml"))
+        else ->
+            detekt.config.setFrom(base)
     }
 }
 
