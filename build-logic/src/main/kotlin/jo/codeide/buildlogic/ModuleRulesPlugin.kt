@@ -120,9 +120,16 @@ class ModuleRulesPlugin : Plugin<Project> {
                     val cible = dependance.path
                     if (cible == chemin) continue
 
-                    if (cible == ":core:testing" && configuration.name !in CONFIGS_TEST) {
-                        problems += "$chemin utilise :core:testing dans '${configuration.name}' " +
-                            "(réservé aux configurations de test)"
+                    if (cible == ":core:testing") {
+                        // `core:testing` est consommable par les tests de
+                        // n'importe quel module (section 5.2 : « utilisé en
+                        // testImplementation seulement ») : la liste
+                        // d'autorisation décrit les dépendances de
+                        // production, pas les doubles de test.
+                        if (configuration.name !in CONFIGS_TEST) {
+                            problems += "$chemin utilise :core:testing dans '${configuration.name}' " +
+                                "(réservé aux configurations de test)"
+                        }
                         continue
                     }
 
