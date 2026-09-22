@@ -50,6 +50,9 @@ androidx-espresso = "3.7.0"
 robolectric = "4.17"
 mockk = "1.14.11"
 turbine = "1.2.1"
+# org.json réel pour les tests JVM purs de core:crash (les stubs android.jar
+# lèvent « not mocked » ; version vérifiée sur Maven Central).
+org-json = "20260814"
 turbine-coroutines-test = "1.11.0"
 
 # Diagnostics en debug.
@@ -121,6 +124,7 @@ androidx-test-runner = { group = "androidx.test", name = "runner", version.ref =
 androidx-test-junit = { group = "androidx.test.ext", name = "junit-ktx", version.ref = "androidx-test-junit" }
 androidx-espresso = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidx-espresso" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
+org-json = { group = "org.json", name = "json", version.ref = "org-json" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 mockk-android = { group = "io.mockk", name = "mockk-android", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
