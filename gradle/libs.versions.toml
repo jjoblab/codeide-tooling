@@ -32,7 +32,6 @@ androidx-navigation = "2.10.1"
 androidx-lifecycle = "2.11.0"
 androidx-recyclerview = "1.4.0"
 androidx-swiperefreshlayout = "1.2.0"  # vérifiée sur Google Maven (dernière stable)
-androidx-constraintlayout = "2.2.2"
 androidx-viewpager2 = "1.1.0"
 # Bibliothèque d'édition (prompt compagnon, section 2.2) — tag stable vérifié
 # sur github.com/jjoblab/code-editor le 2026-09-23 ; artefacts JitPack vérifiés
@@ -49,11 +48,7 @@ serialization = "1.9.0"
 # Tests.
 junit4 = "4.13.2"
 androidx-test-core = "1.7.0"
-androidx-test-runner = "1.7.0"
-androidx-test-junit = "1.3.0"
-androidx-espresso = "3.7.0"
 robolectric = "4.17"
-mockk = "1.14.11"
 turbine = "1.2.1"
 # org.json réel pour les tests JVM purs de core:crash (les stubs android.jar
 # lèvent « not mocked » ; version vérifiée sur Maven Central).
@@ -86,7 +81,6 @@ androidx-activity = { group = "androidx.activity", name = "activity-ktx", versio
 androidx-fragment = { group = "androidx.fragment", name = "fragment-ktx", version.ref = "androidx-fragment" }
 androidx-recyclerview = { group = "androidx.recyclerview", name = "recyclerview", version.ref = "androidx-recyclerview" }
 androidx-swiperefreshlayout = { group = "androidx.swiperefreshlayout", name = "swiperefreshlayout", version.ref = "androidx-swiperefreshlayout" }
-androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "androidx-constraintlayout" }
 androidx-viewpager2 = { group = "androidx.viewpager2", name = "viewpager2", version.ref = "androidx-viewpager2" }
 androidx-splashscreen = { group = "androidx.core", name = "core-splashscreen", version.ref = "androidx-splashscreen" }
 androidx-datastore = { group = "androidx.datastore", name = "datastore-preferences", version.ref = "androidx-datastore" }
@@ -123,20 +117,14 @@ androidx-viewbinding = { group = "androidx.databinding", name = "viewbinding", v
 
 # Kotlin.
 kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-core", version.ref = "coroutines" }
-kotlinx-coroutines-android = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "turbine-coroutines-test" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 
 # Tests unitaires JVM.
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
 androidx-test-core = { group = "androidx.test", name = "core-ktx", version.ref = "androidx-test-core" }
-androidx-test-runner = { group = "androidx.test", name = "runner", version.ref = "androidx-test-runner" }
-androidx-test-junit = { group = "androidx.test.ext", name = "junit-ktx", version.ref = "androidx-test-junit" }
-androidx-espresso = { group = "androidx.test.espresso", name = "espresso-core", version.ref = "androidx-espresso" }
 robolectric = { group = "org.robolectric", name = "robolectric", version.ref = "robolectric" }
 org-json = { group = "org.json", name = "json", version.ref = "org-json" }
-mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
-mockk-android = { group = "io.mockk", name = "mockk-android", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
 
 # Diagnostics en debug.
