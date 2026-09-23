@@ -104,6 +104,7 @@ androidx-material = { group = "com.google.android.material", name = "material", 
 # cel-lsp-api en transitif.
 codeeditor-ui = { group = "com.github.jjoblab.code-editor", name = "cel-ui", version.ref = "code-editor" }
 termux-terminal-emulator = { group = "com.github.termux.termux-app", name = "terminal-emulator", version.ref = "termux" }
+termux-terminal-view = { group = "com.github.termux.termux-app", name = "terminal-view", version.ref = "termux" }
 
 # Persistance.
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

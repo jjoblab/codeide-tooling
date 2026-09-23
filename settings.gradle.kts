@@ -55,6 +55,8 @@ include(":feature:settings")
 include(":feature:diagnostics")
 include(":feature:install")
 include(":feature:editor")
+// Terminal T5 : écran plein écran du terminal (prompt Terminal-1, section 5).
+include(":feature:terminal")
 
 // Outils (hors application — étape 9, ADR 0019 : harnais de vérification).
 include(":tools:generateur")
