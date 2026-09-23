@@ -34,6 +34,10 @@ androidx-recyclerview = "1.4.0"
 androidx-swiperefreshlayout = "1.2.0"  # vérifiée sur Google Maven (dernière stable)
 androidx-constraintlayout = "2.2.2"
 androidx-viewpager2 = "1.1.0"
+# Bibliothèque d'édition (prompt compagnon, section 2.2) — tag stable vérifié
+# sur github.com/jjoblab/code-editor le 2026-09-23 ; artefacts JitPack vérifiés
+# (cel-ui 3.37.0 : aar + pom + module, résolution OK).
+code-editor = "3.37.0"
 androidx-splashscreen = "1.2.0"
 androidx-datastore = "1.2.1"
 material = "1.14.0"
@@ -98,6 +102,10 @@ androidx-lifecycle-savedstate = { group = "androidx.lifecycle", name = "lifecycl
 
 # Interface.
 androidx-material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+# Bibliothèque d'édition : seul module autorisé en dehors du catalogue usuel
+# dans une feature (prompt compagnon, section 3) — embarque cel-core et
+# cel-lsp-api en transitif.
+codeeditor-ui = { group = "com.github.jjoblab.code-editor", name = "cel-ui", version.ref = "code-editor" }
 
 # Persistance.
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

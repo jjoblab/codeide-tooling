@@ -14,6 +14,10 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // Bibliothèque d'édition code-editor (prompt compagnon, section 2.2) :
+        // JitPack pour un build autonome sans jeton — GitHub Packages resterait
+        // l'alternative documentée pour un usage local.
+        maven { url = uri("https://jitpack.io") }
     }
 }
 
