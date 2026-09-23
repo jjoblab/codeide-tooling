@@ -92,6 +92,8 @@ class ModuleRulesPlugin : Plugin<Project> {
             setOf(":core:model", ":core:domain")
         // Terminal-1, section 2.3 : localisation des outils + environnement.
         chemin == ":core:bootstrap" -> setOf(":core:model", ":core:domain")
+        // Terminal-1, section 2.3 : sessions shell réelles (Termux).
+        chemin == ":core:terminal-runtime" -> setOf(":core:model", ":core:domain", ":core:bootstrap")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")

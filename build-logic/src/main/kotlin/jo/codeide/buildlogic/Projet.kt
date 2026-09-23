@@ -92,9 +92,10 @@ internal fun Project.configurerSpotless() {
 /**
  * Espace de noms dérivé du chemin de module (section 2 du prompt) :
  * `:core:model` devient `jo.codeide.core.model`, `:feature:home` devient
- * `jo.codeide.feature.home`.
+ * `jo.codeide.feature.home`. Les tirets des noms de module (Terminal-1 :
+ * `:core:terminal-runtime`) sont retirés — identifiant Java interdit.
  */
 internal fun Project.namespaceDerive(): String {
-    val suffixe = path.removePrefix(":").replace(":", ".").lowercase()
+    val suffixe = path.removePrefix(":").replace(":", ".").replace("-", "").lowercase()
     return "jo.codeide.$suffixe"
 }

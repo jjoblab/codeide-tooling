@@ -37,6 +37,9 @@ androidx-viewpager2 = "1.1.0"
 # sur github.com/jjoblab/code-editor le 2026-09-23 ; artefacts JitPack vérifiés
 # (cel-ui 3.37.0 : aar + pom + module, résolution OK).
 code-editor = "3.37.0"
+# Termux terminal-emulator (Apache-2.0) : sessions shell via pty — v0.118.3
+# vérifiée sur JitPack le 2026-09-23 (com.github.termux.termux-app).
+termux = "v0.118.3"
 androidx-splashscreen = "1.2.0"
 androidx-datastore = "1.2.1"
 material = "1.14.0"
@@ -100,6 +103,7 @@ androidx-material = { group = "com.google.android.material", name = "material", 
 # dans une feature (prompt compagnon, section 3) — embarque cel-core et
 # cel-lsp-api en transitif.
 codeeditor-ui = { group = "com.github.jjoblab.code-editor", name = "cel-ui", version.ref = "code-editor" }
+termux-terminal-emulator = { group = "com.github.termux.termux-app", name = "terminal-emulator", version.ref = "termux" }
 
 # Persistance.
 room-runtime = { group = "androidx.room", name = "room-runtime", version.ref = "room" }

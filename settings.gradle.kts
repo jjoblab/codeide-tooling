@@ -45,6 +45,7 @@ include(":core:testing")
 // Phase 2 — terminal intégré (prompt compagnon Terminal-1, section 2.1) :
 // localisation des outils et environnement de sous-processus.
 include(":core:bootstrap")
+include(":core:terminal-runtime")
 
 // Fonctionnalités.
 include(":feature:onboarding")
