@@ -1,0 +1,9 @@
+{
+  "type": "build_output",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "buildId": "build-7",
+  "stream": "stdout",
+  "line": "BUILD SUCCESSFUL",
+  "timestampMs": 1727100000000
+}

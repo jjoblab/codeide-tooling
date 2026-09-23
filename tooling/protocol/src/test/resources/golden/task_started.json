@@ -1,0 +1,7 @@
+{
+  "type": "task_started",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "buildId": "build-7",
+  "taskPath": ":app:compileKotlin"
+}

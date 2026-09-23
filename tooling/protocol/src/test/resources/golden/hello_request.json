@@ -1,0 +1,7 @@
+{
+  "type": "hello_request",
+  "id": "req-42",
+  "protocolVersion": 2,
+  "clientVersion": "0.26.0",
+  "handshakeSecret": "secret-de-test"
+}

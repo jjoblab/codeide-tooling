@@ -1,0 +1,9 @@
+{
+  "type": "error_response",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "requestId": "req-42",
+  "code": "timeout",
+  "message": "Délai de synchronisation dépassé",
+  "detail": "5 minutes"
+}

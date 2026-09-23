@@ -60,3 +60,9 @@ include(":feature:terminal")
 
 // Outils (hors application — étape 9, ADR 0019 : harnais de vérification).
 include(":tools:generateur")
+
+// Phase 2 — tooling Gradle client-serveur (prompt compagnon Tooling,
+// section 2.1) : G1 pose protocol et testing ; server/api/client/daemon
+// arrivent aux étapes G2-G4.
+include(":tooling:protocol")
+include(":tooling:testing")

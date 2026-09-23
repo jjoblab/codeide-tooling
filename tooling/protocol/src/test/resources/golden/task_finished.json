@@ -1,0 +1,8 @@
+{
+  "type": "task_finished",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "buildId": "build-7",
+  "taskPath": ":app:compileKotlin",
+  "succeeded": true
+}

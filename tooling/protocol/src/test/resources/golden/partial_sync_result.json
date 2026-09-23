@@ -1,0 +1,13 @@
+{
+  "type": "partial_sync_result",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "projectDir": "/projets/demo",
+  "resolvedModels": [
+    "idea",
+    "tasks"
+  ],
+  "failedModels": [
+    "dependencies"
+  ]
+}

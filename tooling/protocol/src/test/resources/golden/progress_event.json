@@ -1,0 +1,7 @@
+{
+  "type": "progress_event",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "buildId": "build-7",
+  "message": "Configuration cache reuse"
+}

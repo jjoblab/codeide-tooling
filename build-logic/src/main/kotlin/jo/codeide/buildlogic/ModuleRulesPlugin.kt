@@ -75,8 +75,12 @@ class ModuleRulesPlugin : Plugin<Project> {
             "kspAndroidTest",
         )
 
-        /** Modules Kotlin JVM purs (section 5.1). */
-        val MODULES_PURS = setOf(":core:model", ":core:domain")
+        /** Modules Kotlin JVM purs (section 5.1 ; Tooling, section 2.1/2.2). */
+        val MODULES_PURS =
+            setOf(
+                ":core:model", ":core:domain",
+                ":tooling:protocol", ":tooling:api", ":tooling:server",
+            )
 
         /** Plugins Android interdits aux modules purs. */
         val PLUGINS_ANDROID = listOf("com.android.application", "com.android.library", "com.android.dynamic-feature")
@@ -98,6 +102,17 @@ class ModuleRulesPlugin : Plugin<Project> {
         // runtime des sessions (rendu) — les autres features n'en dépendent pas.
         chemin == ":feature:terminal" ->
             setOf(":core:ui", ":core:domain", ":core:model", ":core:terminal-runtime")
+        // Tooling (prompt compagnon Tooling, section 2.2) : aucun doublon
+        // des interfaces du prompt Terminal — protocol ne dépend de rien
+        // d'interne, api l'enrichit, server consomme les deux.
+        chemin == ":tooling:protocol" -> emptySet()
+        chemin == ":tooling:api" -> setOf(":tooling:protocol")
+        chemin == ":tooling:server" -> setOf(":tooling:protocol", ":tooling:api")
+        chemin == ":tooling:client" ->
+            setOf(":tooling:protocol", ":tooling:api", ":core:domain")
+        chemin == ":tooling:daemon" ->
+            setOf(":tooling:protocol", ":core:domain", ":tooling:client")
+        chemin == ":tooling:testing" -> setOf(":tooling:protocol", ":tooling:api")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")
@@ -129,14 +144,15 @@ class ModuleRulesPlugin : Plugin<Project> {
                     val cible = dependance.path
                     if (cible == chemin) continue
 
-                    if (cible == ":core:testing") {
-                        // `core:testing` est consommable par les tests de
-                        // n'importe quel module (section 5.2 : « utilisé en
-                        // testImplementation seulement ») : la liste
+                    if (cible == ":core:testing" || cible == ":tooling:testing") {
+                        // `core:testing` et `tooling:testing` sont consommables
+                        // par les tests de n'importe quel module (section 5.2
+                        // et prompt Tooling section 2.2 : « dépendance de test
+                        // uniquement, jamais en implementation ») : la liste
                         // d'autorisation décrit les dépendances de
                         // production, pas les doubles de test.
                         if (configuration.name !in CONFIGS_TEST) {
-                            problems += "$chemin utilise :core:testing dans '${configuration.name}' " +
+                            problems += "$chemin utilise $cible dans '${configuration.name}' " +
                                 "(réservé aux configurations de test)"
                         }
                         continue

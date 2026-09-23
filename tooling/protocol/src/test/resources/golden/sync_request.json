@@ -1,0 +1,7 @@
+{
+  "type": "sync_request",
+  "id": "req-42",
+  "protocolVersion": 2,
+  "projectDir": "/projets/demo",
+  "gradleVersion": "9.7.1"
+}
