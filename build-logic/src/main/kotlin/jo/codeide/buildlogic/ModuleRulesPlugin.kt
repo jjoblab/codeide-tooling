@@ -82,13 +82,16 @@ class ModuleRulesPlugin : Plugin<Project> {
         val PLUGINS_ANDROID = listOf("com.android.application", "com.android.library", "com.android.dynamic-feature")
     }
 
-    /** Liste d'autorisation par module (tableau de la section 5.2). */
+    /** Liste d'autorisation par module (tableau de la section 5.2 du prompt maître ;
+     * additions Phase 2 : prompt compagnon Terminal-1, section 2.3). */
     private fun autorisations(chemin: String): Set<String>? = when {
         chemin == ":app" -> null // assemblage final : tout est permis (sauf core:testing hors test)
         chemin == ":core:model" -> emptySet()
         chemin == ":core:domain" -> setOf(":core:model")
         chemin in setOf(":core:database", ":core:datastore", ":core:storage", ":core:logging") ->
             setOf(":core:model", ":core:domain")
+        // Terminal-1, section 2.3 : localisation des outils + environnement.
+        chemin == ":core:bootstrap" -> setOf(":core:model", ":core:domain")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")

@@ -1,5 +1,7 @@
 // CodeIDE — paramètres du build multi-modules.
-// Les 18 modules de la section 5.1 du prompt maître sont déclarés ici.
+// Modules de la section 5.1 du prompt maître (18 à la fin de la Phase 1) ;
+// la Phase 2 (terminal intégré, prompt compagnon Terminal-1) ajoute
+// core:bootstrap puis core:terminal-runtime et feature:terminal.
 
 pluginManagement {
     repositories {
@@ -39,6 +41,10 @@ include(":core:logging")
 include(":core:crash")
 include(":core:ui")
 include(":core:testing")
+
+// Phase 2 — terminal intégré (prompt compagnon Terminal-1, section 2.1) :
+// localisation des outils et environnement de sous-processus.
+include(":core:bootstrap")
 
 // Fonctionnalités.
 include(":feature:onboarding")
