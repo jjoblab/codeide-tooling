@@ -75,8 +75,22 @@ unzip -q "$archive" -d "$tmp"
 printf 'sdk.dir=%s\n' "$sdk_dir" > "$tmp/local.properties"
 chmod +x "$tmp/gradlew"
 
-echo "[verify-archive] build assembleDebug depuis la copie extraite…"
-( cd "$tmp" && ./gradlew --no-daemon assembleDebug --console=plain -q )
+# ---------------------------------------------------------------------------
+# GRADLE_USER_HOME isolé mais STABLE d'une exécution à l'autre (prompt
+# compagnon Vérification-1, section 2.2) : l'objectif — prouver que
+# l'archive ne dépend d'aucun cache du poste — reste atteint (les caches,
+# le registre de démons et les distributions du répertoire personnel de
+# l'utilisateur ne sont jamais lus : autre racine, autre registre), sans
+# démarrage JVM à froid à chaque étape : le daemon amorcé à la première
+# exécution est réutilisé tant qu'il vit, dans ce même répertoire isolé.
+# Installé hors du dépôt : ni suivi par git, ni effacé par un `clean`.
+# CODEIDE_VERIFY_GRADLE_HOME permet de le relocaliser.
+# ---------------------------------------------------------------------------
+maison_gradle="${CODEIDE_VERIFY_GRADLE_HOME:-$(cd "$(dirname "$0")/.." && pwd)/../verify-gradle-home}"
+mkdir -p "$maison_gradle"
+
+echo "[verify-archive] build assembleDebug depuis la copie extraite (home Gradle isolé : $maison_gradle)…"
+( cd "$tmp" && GRADLE_USER_HOME="$maison_gradle" ./gradlew assembleDebug --console=plain -q )
 
 apk="$tmp/app/build/outputs/apk/debug/app-debug.apk"
 [ -f "$apk" ] || { echo "ERREUR : APK non produit depuis l'archive" >&2; exit 1; }
