@@ -11,8 +11,13 @@ import java.io.IOException
  * Refus typé du handshake côté app (§4.4) : secret invalide, version
  * incompatible ou réponse inattendue — l'orchestrateur a reçu l'erreur
  * protocolaire AVANT la fermeture, l'app sait précisément pourquoi.
+ *
+ * Classe publique depuis G4 : [GradleSocketServer.accepterUneFois] la
+ * lève à travers l'API publique de l'écoute — le daemon doit l'attraper
+ * par type pour décider d'un échec DÉFINITIF (version incompatible) ou
+ * d'une nouvelle tentative.
  */
-internal class EchecHandshakeClient(
+class EchecHandshakeClient(
     message: String,
     cause: Throwable? = null,
 ) : IOException(message, cause)

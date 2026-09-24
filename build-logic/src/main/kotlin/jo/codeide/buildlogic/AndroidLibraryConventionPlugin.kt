@@ -48,17 +48,24 @@ class AndroidLibraryConventionPlugin : Plugin<Project> {
 
                 // Règle 9 : Lint strict, sans ligne de base.
                 //
-                // Exception ciblée et commentée (autorisée par la règle 9) :
-                // NewerVersionAvailable et GradleDependency sont des conseils de
-                // fraîcheur, pas des défauts. Les versions de Kotlin (2.2.10) et
-                // kotlinx-serialization (1.9.0) sont volontairement figées car
-                // dictées par le Kotlin intégré d'AGP 9.4.1 — monter à 2.4.x / 1.11
-                // casserait la lecture des métadonnées compilées. Voir ADR 0007.
+                // Exceptions ciblées et commentées (autorisées par la
+                // règle 9) : NewerVersionAvailable, GradleDependency et
+                // AndroidGradlePluginVersion sont des conseils de
+                // fraîcheur, pas des défauts. Les versions de Kotlin
+                // (2.2.10) et kotlinx-serialization (1.9.0) sont
+                // volontairement figées car dictées par le Kotlin intégré
+                // d'AGP 9.4.1 (monter à 2.4.x / 1.11 casserait la lecture
+                // des métadonnées compilées — ADR 0007) ; le wrapper Gradle
+                // 9.7.1 est ÉPINGLÉ sur la Tooling API 9.7.1 (alignement
+                // exact, docs/TOOLING.md — G4 : 9.8.0 passée stable le jour
+                // même a fait apparaître le conseil, ce n'est pas un défaut
+                // tant que l'alignement tooling est la règle).
                 lint {
                     warningsAsErrors = true
                     abortOnError = true
                     disable.add("NewerVersionAvailable")
                     disable.add("GradleDependency")
+                    disable.add("AndroidGradlePluginVersion")
                 }
             }
 

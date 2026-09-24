@@ -65,13 +65,16 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 }
 
                 // Règle 9 : Lint strict, sans ligne de base.
-                // Exception ciblée pour les conseils de fraîcheur — voir la
-                // justification complète dans AndroidLibraryConventionPlugin / ADR 0007.
+                // Exceptions ciblées pour les conseils de fraîcheur — voir la
+                // justification complète dans AndroidLibraryConventionPlugin / ADR 0007
+                // (ajout G4 : AndroidGradlePluginVersion — wrapper 9.7.1 épinglé
+                // sur la Tooling API 9.7.1, docs/TOOLING.md).
                 lint {
                     warningsAsErrors = true
                     abortOnError = true
                     disable.add("NewerVersionAvailable")
                     disable.add("GradleDependency")
+                    disable.add("AndroidGradlePluginVersion")
                 }
             }
 

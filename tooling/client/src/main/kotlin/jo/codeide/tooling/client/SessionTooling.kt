@@ -16,8 +16,13 @@ import java.io.IOException
  * Session de dialogue avec l'orchestrateur (§7.3) — le point de couture
  * des tests : l'implémentation réelle ([SessionSocketAndroid]) parle à un
  * `LocalSocket`, les tests la remplacent par une session factice.
+ *
+ * Interface publique depuis G4 : le daemon (`tooling:daemon`) accepte des
+ * sessions via son hôte de socket puis les injecte dans
+ * [GradleApiImpl.ouvrirSession] — et son test bout-en-bout (§7.4) branche
+ * une session JVM sur un vrai socket Unix.
  */
-internal interface SessionTooling {
+interface SessionTooling {
     /**
      * Envoie un message (requête vers l'orchestrateur, ou réponse de
      * handshake — les deux sens partagent le canal, écritures

@@ -34,8 +34,12 @@ import java.io.File
  * (aucune shadow, 4.17 — vérifié) : la LOGIQUE de validation vit dans
  * [HandshakeApp] (testée via session factice) et la session dans
  * [SessionSocketAndroid] ; ce fichier reste la couche mince d'écoute.
+ *
+ * Classe publique depuis G4 : le daemon (`tooling:daemon`) l'enveloppe
+ * dans son hôte de socket (cette classe reste la seule à parler
+ * `LocalSocket`) — ses méthodes sont le contrat d'écoute.
  */
-internal class GradleSocketServer(
+class GradleSocketServer(
     private val dossierSocket: File,
     private val versionApp: String,
 ) {

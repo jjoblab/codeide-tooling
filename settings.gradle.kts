@@ -69,9 +69,11 @@ include(":tools:generateur")
 // Phase 2 — tooling Gradle client-serveur (prompt compagnon Tooling,
 // section 2.1) : G1 pose protocol et testing ; G2 ajoute api (modèles
 // partagés) et server (orchestrateur Tooling API, JAR unique exécutable) ;
-// client et daemon arrivent aux étapes G3-G4.
+// G3 le client Android, G4 le daemon (déploiement du JAR, lancement du
+// process, health check, relances bornées).
 include(":tooling:protocol")
 include(":tooling:api")
 include(":tooling:server")
 include(":tooling:client")
+include(":tooling:daemon")
 include(":tooling:testing")

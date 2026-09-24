@@ -75,6 +75,13 @@ import javax.inject.Singleton
  * session s'ouvre ici par [ouvrirSession] ; sans session, les opérations
  * renvoient des échecs typés de connexion — jamais de blocage silencieux.
  *
+ * Visibilité publique depuis G4 : le daemon (`tooling:daemon`) consomme
+ * [ouvrirSession]/[fermerSession] pour y injecter les sessions acceptées,
+ * [marquerEnConnexion]/[marquerEchouee] pour animer les états intermédiaires
+ * du port (ADR 0041 décision 8) et [dernierPongMs] pour son health check
+ * ping/pong (§5.4) — les pongs arrivent dans le flux d'événements pompé
+ * ici, c'est donc cette classe qui tient le repère à jour.
+ *
  * Exemption detekt ciblée (règle 16) : TooManyFunctions — les surcharges
  * viennent du contrat [GradleToolingRepository] (§5.3 du prompt Tooling),
  * le reste sont les traductions protocol → domaine et la plomberie de
@@ -83,12 +90,33 @@ import javax.inject.Singleton
  */
 @Suppress("TooManyFunctions")
 @Singleton
-internal class GradleApiImpl
+class GradleApiImpl
     @Inject
     constructor() : GradleToolingRepository {
         private val connexion = MutableStateFlow(EtatConnexion.DECONNECTEE)
         private val tas = MutableStateFlow(InstantaneTas(0, 0))
         private val diagnosticsGlobal = MutableStateFlow<List<DiagnosticBuild>>(emptyList())
+
+        /**
+         * Horodatage (epoch ms) du dernier [PongMessage] reçu — 0 si aucun.
+         *
+         * Health check du daemon (§5.4) : il sonde l'orchestrateur par
+         * `PingMessage` toutes les 5 s et le déclare muet si ce repère
+         * vieillit au-delà du délai de 15 s. Les pongs transitent dans le
+         * flux d'événements pompé ici — le repère est initialisé à
+         * l'ouverture de la session (un orchestrateur qui vient de négocier
+         * son handshake est vivant MAINTENANT : le premier contrôle a une
+         * base saine).
+         */
+        val dernierPongMs = MutableStateFlow(0L)
+
+        /**
+         * Valeur courante de l'état de connexion — accès direct (sans flux)
+         * pour le daemon et les tests : [observeConnectionState] reste la
+         * voie d'abonnement de l'UI.
+         */
+        val etatConnexion: EtatConnexion
+            get() = connexion.value
 
         /** Sorties par build — canal borné, envoi suspendant (§5.2). */
         private val sorties = ConcurrentHashMap<String, Channel<LigneSortieBuild>>()
@@ -116,6 +144,8 @@ internal class GradleApiImpl
             fermerSession()
             session = nouvelleSession
             connexion.value = EtatConnexion.CONNECTEE
+            // Repère initial du health check (§5.4) : voir [dernierPongMs].
+            dernierPongMs.value = System.currentTimeMillis()
             val portee = CoroutineScope(SupervisorJob())
             porteePompe = portee
             portee.launch {
@@ -136,6 +166,26 @@ internal class GradleApiImpl
                     }
                 }
             }
+        }
+
+        /**
+         * Publie l'état intermédiaire `EN_CONNEXION` — appelé par le daemon
+         * (G4) avant de lancer le process : l'UI qui observe
+         * [observeConnectionState] distingue « pas d'orchestrateur » et
+         * « orchestrateur en cours de démarrage » (ADR 0041 décision 8).
+         */
+        fun marquerEnConnexion() {
+            connexion.value = EtatConnexion.EN_CONNEXION
+        }
+
+        /**
+         * Publie l'état terminal `ECHOUEE` — appelé par le daemon (G4) quand
+         * les tentatives de (re)démarrage sont épuisées (§5.4, bornage à
+         * `MAX_RECONNECT_ATTEMPTS`) : échec définitif jusqu'à un nouvel
+         * appel de démarrage.
+         */
+        fun marquerEchouee() {
+            connexion.value = EtatConnexion.ECHOUEE
         }
 
         /** Ferme la session courante (idempotent) et borné son empreinte. */
@@ -205,7 +255,9 @@ internal class GradleApiImpl
                 }
 
                 is PongMessage -> {
-                    Unit
+                    // Repère du health check du daemon (§5.4) : la réponse
+                    // de santé rafraîchit l'horodatage observé.
+                    dernierPongMs.value = System.currentTimeMillis()
                 }
 
                 // santé pilotée par le daemon (G4)

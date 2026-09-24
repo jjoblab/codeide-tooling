@@ -158,6 +158,21 @@ class ModuleRulesPlugin : Plugin<Project> {
                         continue
                     }
 
+                    // G4 (ADR 0042) : le VRAI orchestrateur (:tooling:server)
+                    // n'entre dans :tooling:daemon qu'en configuration de
+                    // TEST — le bout-en-bout §7.4 relance le process réel
+                    // (ServerMain) depuis la JVM de test pour éprouver le
+                    // dialogue complet du daemon ; en production, le daemon
+                    // ne voit du serveur que le JAR déployé (aucune dépendance
+                    // de code).
+                    if (cible == ":tooling:server" && chemin == ":tooling:daemon") {
+                        if (configuration.name !in CONFIGS_TEST) {
+                            problems += "$chemin utilise $cible dans '${configuration.name}' " +
+                                "(réservé aux configurations de test — bout-en-bout §7.4, ADR 0042)"
+                        }
+                        continue
+                    }
+
                     if (autorises != null && cible !in autorises) {
                         problems += "$chemin dépend de $cible (interdit par la section 5.2 " +
                             "— autorisés ici : ${if (autorises.isEmpty()) "aucun" else autorises.joinToString()})"
