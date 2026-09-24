@@ -55,7 +55,8 @@ zip -qr "dist/$archive" . \
     -x 'captures/*' \
     -x '.cxx/*' \
     -x '*.iml' \
-    -x '.DS_Store'
+    -x '.DS_Store' \
+    -x 'app/src/main/assets/tooling/*'
 
 # ---------------------------------------------------------------------------
 # 3. Empreintes SHA-256.

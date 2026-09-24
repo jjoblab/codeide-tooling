@@ -28,3 +28,8 @@ Thumbs.db
 
 # Livrables
 dist/
+
+# Tooling Gradle (G2, §4.7 du prompt Tooling) : le JAR orchestrateur des
+# assets est un ARTEFACT DE BUILD régénéré par :tooling:server:copierJarVersAssets
+# (branché sur preBuild de l'app) — jamais une source versionnée.
+app/src/main/assets/tooling/

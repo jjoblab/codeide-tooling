@@ -9,6 +9,9 @@ hilt = "2.60.1"
 detekt = "1.23.8"
 spotless = "8.10.2"
 kover = "0.9.9"
+# Tooling G2 : plugin fat jar, vérifié sur le portail de plugins Gradle le
+# 2026-09-24 (successeur maintenu de johnrengelman/shadow, fin de vie).
+shadow = "9.6.1"
 
 [libraries]
 android-gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "agp" }
@@ -18,3 +21,4 @@ hilt-gradlePlugin = { group = "com.google.dagger", name = "hilt-android-gradle-p
 detekt-gradlePlugin = { group = "io.gitlab.arturbosch.detekt", name = "detekt-gradle-plugin", version.ref = "detekt" }
 spotless-gradlePlugin = { group = "com.diffplug.spotless", name = "spotless-plugin-gradle", version.ref = "spotless" }
 kover-gradlePlugin = { group = "org.jetbrains.kotlinx", name = "kover-gradle-plugin", version.ref = "kover" }
+shadow-gradlePlugin = { group = "com.gradleup.shadow", name = "shadow-gradle-plugin", version.ref = "shadow" }

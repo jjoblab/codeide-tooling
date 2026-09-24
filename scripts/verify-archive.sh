@@ -43,9 +43,9 @@ echo "[verify-archive] contrôle des exclusions…"
 # ---------------------------------------------------------------------------
 listing=$(unzip -Z1 "$archive")
 
-if [ -n "$(printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|\.iml$|\.keystore$|\.jks$|\.DS_Store$' || true)" ]; then
+if [ -n "$(printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|(^|/)app/src/main/assets/tooling/|\.iml$|\.keystore$|\.jks$|\.DS_Store$' || true)" ]; then
     echo "ERREUR : fichiers interdits dans l'archive :" >&2
-    printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|\.iml$|\.keystore$|\.jks$|\.DS_Store$' >&2 || true
+    printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|(^|/)app/src/main/assets/tooling/|\.iml$|\.keystore$|\.jks$|\.DS_Store$' >&2 || true
     exit 1
 fi
 echo "[verify-archive] aucun fichier interdit"

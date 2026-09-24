@@ -20,6 +20,11 @@ dependencyResolutionManagement {
         // JitPack pour un build autonome sans jeton — GitHub Packages resterait
         // l'alternative documentée pour un usage local.
         maven { url = uri("https://jitpack.io") }
+        // Tooling Gradle (G2) : org.gradle:gradle-tooling-api ne vit que sur le
+        // dépôt officiel de Gradle — les métadonnées Maven Central de cette
+        // coordonnée sont périmées (7.3-snapshot de 2021). Vérifié le
+        // 2026-09-24 (voir docs/TOOLING.md).
+        maven { url = uri("https://repo.gradle.org/gradle/libs-releases/") }
     }
 }
 
@@ -62,7 +67,10 @@ include(":feature:terminal")
 include(":tools:generateur")
 
 // Phase 2 — tooling Gradle client-serveur (prompt compagnon Tooling,
-// section 2.1) : G1 pose protocol et testing ; server/api/client/daemon
-// arrivent aux étapes G2-G4.
+// section 2.1) : G1 pose protocol et testing ; G2 ajoute api (modèles
+// partagés) et server (orchestrateur Tooling API, JAR unique exécutable) ;
+// client et daemon arrivent aux étapes G3-G4.
 include(":tooling:protocol")
+include(":tooling:api")
+include(":tooling:server")
 include(":tooling:testing")

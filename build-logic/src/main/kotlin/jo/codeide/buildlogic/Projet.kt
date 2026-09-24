@@ -62,6 +62,10 @@ internal fun Project.configurerDetekt() {
     val base = rootDir.resolve("config/detekt/detekt.yml")
     val exemtes = setOf(":core:logging", ":core:crash")
     val outilConsole = setOf(":tools:generateur")
+    // Tooling G2 (ADR 0040) : l'orchestrateur vit dans un process JVM séparé —
+    // sa sortie d'erreur EST son canal de journalisation (réinjectée dans
+    // AppLogger par le daemon, section 6 du prompt Tooling).
+    val serveurTooling = setOf(":tooling:server")
     when {
         path in exemtes ->
             detekt.config.setFrom(base, rootDir.resolve("config/detekt/detekt-journalisation-autorisee.yml"))
@@ -69,6 +73,8 @@ internal fun Project.configurerDetekt() {
         // une journalisation — exemption documentée, rien d'autre n'est levé.
         path in outilConsole ->
             detekt.config.setFrom(base, rootDir.resolve("config/detekt/detekt-sortie-console-autorisee.yml"))
+        path in serveurTooling ->
+            detekt.config.setFrom(base, rootDir.resolve("config/detekt/detekt-serveur-tooling.yml"))
         else ->
             detekt.config.setFrom(base)
     }

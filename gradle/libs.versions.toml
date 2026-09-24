@@ -68,6 +68,16 @@ ktlint = "1.8.0"
 kover = "0.9.9"
 dokka = "2.2.0"
 
+# Tooling Gradle (prompt compagnon Tooling — versions VÉRIFIÉES sur les dépôts
+# officiels le 2026-09-24, jour de G2, et documentées dans docs/TOOLING.md) :
+# gradle-tooling-api 9.7.1 = dernière stable, ALIGNÉE sur le Gradle du wrapper —
+# les métadonnées Maven Central de cette coordonnée sont périmées (7.3-snapshot
+# de 2021) : le dépôt de référence est repo.gradle.org/gradle/libs-releases,
+# ajouté à settings.gradle.kts. shadow 9.6.1 = successeur maintenu de
+# johnrengelman (fin de vie), vérifié sur le portail de plugins Gradle.
+gradle-tooling-api = "9.7.1"
+shadow = "9.6.1"
+
 # Divers.
 javax-inject = "1"
 
@@ -125,6 +135,9 @@ kotlinx-coroutines-core = { group = "org.jetbrains.kotlinx", name = "kotlinx-cor
 kotlinx-coroutines-test = { group = "org.jetbrains.kotlinx", name = "kotlinx-coroutines-test", version.ref = "turbine-coroutines-test" }
 kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-serialization-json", version.ref = "serialization" }
 
+# Tooling Gradle (G2) : orchestrateur Tooling API (tooling:server uniquement).
+gradle-tooling-api = { group = "org.gradle", name = "gradle-tooling-api", version.ref = "gradle-tooling-api" }
+
 # Tests unitaires JVM.
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
 androidx-test-core = { group = "androidx.test", name = "core-ktx", version.ref = "androidx-test-core" }
@@ -143,6 +156,7 @@ kotlin-serialization = { id = "org.jetbrains.kotlin.plugin.serialization", versi
 ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 detekt = { id = "io.gitlab.arturbosch.detekt", version.ref = "detekt" }
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }
 spotless = { id = "com.diffplug.spotless", version.ref = "spotless" }
 kover = { id = "org.jetbrains.kotlinx.kover", version.ref = "kover" }
 dokka = { id = "org.jetbrains.dokka", version.ref = "dokka" }

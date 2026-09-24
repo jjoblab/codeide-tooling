@@ -13,6 +13,8 @@ plugins {
     alias(libs.plugins.detekt) apply false
     alias(libs.plugins.spotless) apply false
     alias(libs.plugins.kover) apply false
+    // Tooling G2 : assemblage JAR unique de tooling:server (ADR 0040).
+    alias(libs.plugins.shadow) apply false
     // Documentation API des modules purs explicitApi (audit étape 18) :
     // appliqué dans core:model et core:domain uniquement.
     alias(libs.plugins.dokka) apply false
