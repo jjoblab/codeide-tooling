@@ -42,6 +42,7 @@ import java.nio.ByteBuffer
 import java.nio.channels.Channels
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
+import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * BOUT-EN-BOUT RÉEL du tooling (§7.4) : le [DaemonManager] lance le VRAI
@@ -216,9 +217,13 @@ class BoutEnBoutTest {
  * exact du rôle de `GradleSocketServer` (ADR 0041) : accept, lecture de la
  * première frame (HelloRequest), validation du secret PAR ASSERTION (le
  * test EST l'app), réponse HelloResponse, puis session JDK.
+ *
+ * G6 (chaos §7.5) : la dernière session acceptée reste exposée
+ * ([rompreDerniereSession]) — le test de chaos simule la perte du socket
+ * côté « app » (crash de l'app, mise à mort).
  */
 @Suppress("SwallowedException")
-private class HoteSocketJvm(
+internal class HoteSocketJvm(
     dossier: File,
 ) : HoteSocketTooling {
     private lateinit var canalServeur: ServerSocketChannel
@@ -233,6 +238,15 @@ private class HoteSocketJvm(
     /** Le secret présenté correspondait à celui passé au process. */
     var secretValide: Boolean = false
         private set
+
+    /** Dernière session acceptée (le chaos rompt le canal côté « app »). */
+    var derniereSession: SessionSocketJvm? = null
+        private set
+
+    /** Rompt la dernière session acceptée (§7.5 : socket perdue). */
+    fun rompreDerniereSession() {
+        derniereSession?.fermer()
+    }
 
     override fun ouvrir() {
         cheminSocket.parentFile?.let { dossier -> if (!dossier.isDirectory) dossier.mkdirs() }
@@ -270,7 +284,7 @@ private class HoteSocketJvm(
                 supportedFeatures = setOf("build", "sync", "tasks", "cancel", "heap"),
             )
         envoyerFrame(canal, reponse)
-        return SessionSocketJvm(canal)
+        return SessionSocketJvm(canal).also { session -> derniereSession = session }
     }
 
     override fun fermer() {
@@ -335,7 +349,7 @@ private class HoteSocketJvm(
  * (écritures sérialisées par verrou, flux froid, EOF = complétion).
  */
 @Suppress("SwallowedException")
-private class SessionSocketJvm(
+internal class SessionSocketJvm(
     private val canal: SocketChannel,
 ) : SessionTooling {
     private val verrou = Mutex()
@@ -396,8 +410,26 @@ private class SessionSocketJvm(
  * `LanceurProcessusNatifs` (core:bootstrap) en version test — le VRAI
  * process `java` démarre, ses sorties se lisent ligne à ligne, sa mort
  * s'attend par `onExit`.
+ *
+ * G6 (chaos §7.5) : les process lancés restent référencés — le test de
+ * chaos tue le dernier ([tuerDernierProcess]) ou vérifie qu'aucun
+ * orphelin ne survit à l'arrêt.
  */
-private class LanceurProcessusReel : NativeProcessLauncher {
+internal class LanceurProcessusReel : NativeProcessLauncher {
+    /** Process lancés, dans l'ordre (le chaos s'en sert). */
+    val processus = CopyOnWriteArrayList<Process>()
+
+    /** Tue le dernier process lancé (kill -9 si [force]). */
+    fun tuerDernierProcess(force: Boolean) {
+        processus.lastOrNull()?.let { process ->
+            if (force) {
+                process.destroyForcibly()
+            } else {
+                process.destroy()
+            }
+        }
+    }
+
     /** Période de sonde de la mort du process (miroir du port : 100 ms). */
     private companion object {
         const val PERIODE_SONDE_MS = 100L
@@ -411,6 +443,7 @@ private class LanceurProcessusReel : NativeProcessLauncher {
         val constructeur = ProcessBuilder(command)
         workingDir?.let { constructeur.directory(it) }
         val process = constructeur.start()
+        processus += process
         return object : ManagedProcess {
             override val pid: Int =
                 runCatching { process.pid().toInt() }.getOrDefault(-1)

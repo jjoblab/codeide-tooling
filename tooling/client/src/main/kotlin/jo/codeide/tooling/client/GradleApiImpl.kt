@@ -163,6 +163,7 @@ class GradleApiImpl
                         connexion.value = EtatConnexion.DECONNECTEE
                         session = null
                         romprePromesses()
+                        rompreBuildsEnCours()
                     }
                 }
             }
@@ -493,6 +494,31 @@ class GradleApiImpl
                 )
             }
             promesses.clear()
+        }
+
+        /**
+         * Conclut les builds EN COURS à la perte de session (§7.5 : process
+         * tué en plein build, socket perdue) — sans cela un build orphelin
+         * resterait EN_COURS à jamais : aucun [BuildFinished] n'arrivera
+         * plus, l'état observé par l'UI ne changerait plus et le canal de
+         * sortie resterait ouvert (collecteur suspendu indéfiniment).
+         * Même sémantique de fermeture que [pomperFin] : l'état porte
+         * l'échec, le canal se ferme — un collecteur tardif draine le
+         * tampon puis complète.
+         */
+        private fun rompreBuildsEnCours() {
+            etats.values
+                .filter { etatBuild -> etatBuild.value.statut == StatutBuild.EN_COURS }
+                .forEach { etatBuild ->
+                    val buildId = etatBuild.value.buildId
+                    etatBuild.value =
+                        EtatBuild(
+                            buildId = buildId,
+                            statut = StatutBuild.ECHOUE,
+                            messageEchec = "connexion avec l'orchestrateur perdue",
+                        )
+                    sorties[buildId]?.close()
+                }
         }
 
         private fun sortie(buildId: String): Channel<LigneSortieBuild> =

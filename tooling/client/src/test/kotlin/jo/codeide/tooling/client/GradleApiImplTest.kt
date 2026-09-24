@@ -453,4 +453,48 @@ class GradleApiImplTest {
             )
             assertEquals(EtatConnexion.DECONNECTEE, api.observeConnectionState().first())
         }
+
+    @Test
+    fun `une deconnexion echoue les builds en cours`() =
+        runBlocking {
+            // §7.5 (chaos : process tué en plein build) : la fin du flux
+            // d'événements doit CONCLURE les builds EN COURS — sans cela
+            // aucun BuildFinished n'arriverait jamais : l'état observé par
+            // l'onglet Sortie resterait EN_COURS à vie et le canal de
+            // sortie ne se fermerait jamais (collecteur suspendu).
+            val session =
+                SessionFactice { requete, soi ->
+                    if (requete is BuildRequest) {
+                        soi.emettre(BuildStarted(nouvelId(), protocole, requete.buildId, listOf("endormir")))
+                        soi.emettre(
+                            BuildOutput(nouvelId(), protocole, requete.buildId, StreamKind.STDOUT, "en cours…", 1L),
+                        )
+                        // PAS de BuildFinished : le process meurt avant la
+                        // fin du build.
+                    }
+                }
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+            val buildId = api.build(File("/p"), listOf("endormir"))
+
+            session.deconnecter()
+
+            val etatFinal =
+                withTimeout(5_000) {
+                    api.observeBuildState(buildId).first { it.statut != StatutBuild.EN_COURS }
+                }
+            assertEquals(StatutBuild.ECHOUE, etatFinal.statut)
+            assertTrue(
+                "le message d'échec devait porter la perte de connexion : ${etatFinal.messageEchec}",
+                etatFinal.messageEchec.orEmpty().contains("perdue"),
+            )
+            // Le canal se ferme : le collecteur draine le tampon puis
+            // complète — aucune suspension infinie.
+            val lignes =
+                withTimeout(5_000) {
+                    api.observeBuildOutput(buildId).toList()
+                }
+            assertEquals(listOf("en cours…"), lignes.map { it.ligne })
+            assertEquals(EtatConnexion.DECONNECTEE, api.observeConnectionState().first())
+        }
 }
