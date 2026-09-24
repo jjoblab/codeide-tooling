@@ -20,7 +20,14 @@ room = "2.8.5"
 compileSdk = "37"
 compileSdkMinor = "2"
 minSdk = "26"
-targetSdk = "37"
+# 28, pas la dernière API : Android 10 interdit à une app targetSdk >= 29
+# d'exécuter (exec) un binaire écrit dans ses données — restriction W^X.
+# Tout le modèle du terminal intégré (second stage, apt, shell, JDK du
+# bootstrap) exécute des binaires extraits dans filesDir/usr : le
+# targetSdk reste bloqué à 28, précédent Termux (même raison). App
+# chargée par side-loading — l'exigence Play (>= 34) ne s'applique pas.
+# ADR 0045 ; règle maintenue après le retour d'appareil réel (v0.31.1).
+targetSdk = "28"
 
 # AndroidX.
 androidx-annotation = "1.10.0"

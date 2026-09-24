@@ -68,13 +68,18 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 // Exceptions ciblées pour les conseils de fraîcheur — voir la
                 // justification complète dans AndroidLibraryConventionPlugin / ADR 0007
                 // (ajout G4 : AndroidGradlePluginVersion — wrapper 9.7.1 épinglé
-                // sur la Tooling API 9.7.1, docs/TOOLING.md).
+                // sur la Tooling API 9.7.1, docs/TOOLING.md ; ajout v0.31.1 :
+                // ExpiringTargetSdkVersion — l'app est chargée par
+                // side-loading, l'exigence Play ne s'applique pas, et le
+                // targetSdk 28 est délibéré pour l'exécution des binaires du
+                // bootstrap — ADR 0045).
                 lint {
                     warningsAsErrors = true
                     abortOnError = true
                     disable.add("NewerVersionAvailable")
                     disable.add("GradleDependency")
                     disable.add("AndroidGradlePluginVersion")
+                    disable.add("ExpiringTargetSdkVersion")
                 }
             }
 
