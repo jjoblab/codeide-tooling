@@ -17,11 +17,17 @@ import java.io.OutputStream
  * nécessairement complète ('\n' n'est jamais un octet de continuation).
  * Le '\r' final d'une fin Windows est retiré : la ligne est le contenu,
  * pas la terminaison.
+ *
+ * G5 : [observateur] reçoit chaque ligne décodée AVANT publication — le
+ * [ParseurDiagnostics] y extrait les diagnostics de compilation (ils ne
+ * sont PAS dans le message d'échec final, mais dans la sortie erreur du
+ * compilateur).
  */
 internal class StreamingOutputStream(
     private val buildId: String,
     private val flux: StreamKind,
     private val bus: EventBus,
+    private val observateur: ((String) -> Unit)? = null,
 ) : OutputStream() {
     private val tampon = ByteArrayOutputStream()
     private val verrou = Any()
@@ -75,13 +81,15 @@ internal class StreamingOutputStream(
             octets = octets.copyOf(octets.size - 1)
         }
         if (octets.isEmpty()) return
+        val texte = octets.toString(Charsets.UTF_8)
+        observateur?.invoke(texte)
         bus.publier(
             BuildOutput(
                 id = nouvelId(),
                 protocolVersion = jo.codeide.tooling.protocol.GradleProtocol.PROTOCOL_VERSION,
                 buildId = buildId,
                 stream = flux,
-                line = octets.toString(Charsets.UTF_8),
+                line = texte,
                 timestampMs = System.currentTimeMillis(),
             ),
         )

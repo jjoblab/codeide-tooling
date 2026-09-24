@@ -6,6 +6,8 @@ import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.DependenciesRequest
 import jo.codeide.tooling.protocol.DependenciesResult
+import jo.codeide.tooling.protocol.Diagnostic
+import jo.codeide.tooling.protocol.DiagnosticSeverity
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
 import jo.codeide.tooling.protocol.FrameCodec
@@ -187,6 +189,32 @@ class ServeurIntegrationTest {
         val fin = app.attendre(DELAI_BUILD, BuildFinished::class)
         assertEquals(false, fin.succeeded)
         assertNotNull("un message d'échec était attendu", fin.failureMessage)
+    }
+
+    @Test
+    fun `un build en erreur de compilation remonte des diagnostics positionnes (G5)`() {
+        val app = demarrer()
+        val projet = fixture("erreur-compilation")
+        app.envoyer(
+            BuildRequest(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+                tasks = listOf("compileJava"),
+                buildId = "b-diagnostics",
+            ),
+        )
+        // Les diagnostics précèdent la fin (extraits de stderr en vol).
+        val diagnostic = app.attendre(DELAI_BUILD, Diagnostic::class)
+        assertEquals(DiagnosticSeverity.ERROR, diagnostic.severity)
+        assertTrue(
+            "le diagnostic devait pointer la fixture : ${diagnostic.file}",
+            diagnostic.file.endsWith("Casse.java"),
+        )
+        assertTrue("la ligne devait être posée : ${diagnostic.line}", diagnostic.line >= 1)
+        assertTrue("le message devait être rempli", diagnostic.message.isNotBlank())
+        assertEquals("javac", diagnostic.source)
+        app.attendre(DELAI_BUILD, BuildFinished::class)
     }
 
     @Test

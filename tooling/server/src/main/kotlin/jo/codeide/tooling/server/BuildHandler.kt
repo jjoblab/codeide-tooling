@@ -77,21 +77,20 @@ internal class BuildHandler(
                             .setStandardOutput(
                                 StreamingOutputStream(requete.buildId, StreamKind.STDOUT, bus),
                             ).setStandardError(
-                                StreamingOutputStream(requete.buildId, StreamKind.STDERR, bus),
+                                // G5 : la sortie d'erreur porte AUSSI les
+                                // diagnostics de compilation (javac/kotlinc y
+                                // écrivent leurs positions, pas dans le
+                                // message d'échec final).
+                                StreamingOutputStream(
+                                    requete.buildId,
+                                    StreamKind.STDERR,
+                                    bus,
+                                    observateur = ::publierDiagnostics,
+                                ),
                             ).addProgressListener(ProgressBridge(requete.buildId, bus), OperationType.TASK)
                             .withCancellationToken(jeton.token())
                     suite.invokeOnCancellation { jeton.cancel() }
-                    lanceur.run(
-                        object : ResultHandler<Void> {
-                            override fun onComplete(resultat: Void?) {
-                                suite.resume(Unit)
-                            }
-
-                            override fun onFailure(echec: GradleConnectionException) {
-                                suite.resumeWithException(echec)
-                            }
-                        },
-                    )
+                    lanceur.run(handlerResultat(suite))
                 }
             }
             publierFin(requete.buildId, reussi = true, debut, null)
@@ -132,6 +131,28 @@ internal class BuildHandler(
     fun toutAnnuler() {
         annulations.values.forEach { it.cancel() }
     }
+
+    /**
+     * Publie le diagnostic extrait d'une ligne de stderr (G5) — une ligne
+     * non reconnue (contexte, carets…) est simplement ignorée.
+     */
+    private fun publierDiagnostics(ligne: String) {
+        ParseurDiagnostics.analyser(ligne)?.let { diagnostic ->
+            bus.publier(diagnostic)
+        }
+    }
+
+    /** Handler Tooling API → coroutine : la fin du build reprend la suite. */
+    private fun handlerResultat(suite: kotlinx.coroutines.CancellableContinuation<Unit>): ResultHandler<Void> =
+        object : ResultHandler<Void> {
+            override fun onComplete(resultat: Void?) {
+                suite.resume(Unit)
+            }
+
+            override fun onFailure(echec: GradleConnectionException) {
+                suite.resumeWithException(echec)
+            }
+        }
 
     private fun publierFin(
         buildId: String,
