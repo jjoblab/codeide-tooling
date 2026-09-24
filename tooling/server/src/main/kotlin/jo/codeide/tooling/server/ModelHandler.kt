@@ -39,7 +39,7 @@ internal class ModelHandler(
             Journal.info("modèle résolu : ${modele.nom} — ${modele.modules.size} modules")
             bus.publier(
                 SyncResult(
-                    id = nouvelId(),
+                    id = requete.id,
                     protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                     projectDir = requete.projectDir,
                     succeeded = true,
@@ -50,7 +50,7 @@ internal class ModelHandler(
             Journal.warn("modèle de projet non résolu : ${t.message}")
             bus.publier(
                 SyncResult(
-                    id = nouvelId(),
+                    id = requete.id,
                     protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                     projectDir = requete.projectDir,
                     succeeded = false,

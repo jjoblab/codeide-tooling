@@ -41,7 +41,7 @@ internal class DependenciesHandler(
             }
         bus.publier(
             DependenciesResult(
-                id = nouvelId(),
+                id = requete.id,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = requete.projectDir,
                 dependencies = dependances,

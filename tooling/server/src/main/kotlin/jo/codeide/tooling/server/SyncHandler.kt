@@ -43,7 +43,7 @@ internal class SyncHandler(
             resolus.isEmpty() -> {
                 bus.publier(
                     SyncResult(
-                        id = nouvelId(),
+                        id = requete.id,
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = requete.projectDir,
                         succeeded = false,
@@ -56,7 +56,7 @@ internal class SyncHandler(
             echoues.isEmpty() -> {
                 bus.publier(
                     SyncResult(
-                        id = nouvelId(),
+                        id = requete.id,
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = requete.projectDir,
                         succeeded = true,
@@ -68,7 +68,7 @@ internal class SyncHandler(
             else -> {
                 bus.publier(
                     PartialSyncResult(
-                        id = nouvelId(),
+                        id = requete.id,
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = requete.projectDir,
                         resolvedModels = resolus.toList(),

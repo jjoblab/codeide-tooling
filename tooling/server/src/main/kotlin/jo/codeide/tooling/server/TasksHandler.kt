@@ -32,7 +32,7 @@ internal class TasksHandler(
             }
         bus.publier(
             TasksResult(
-                id = nouvelId(),
+                id = requete.id,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = requete.projectDir,
                 tasks = taches,

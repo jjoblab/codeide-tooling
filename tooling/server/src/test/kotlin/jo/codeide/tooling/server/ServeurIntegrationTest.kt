@@ -254,14 +254,20 @@ class ServeurIntegrationTest {
     fun `la liste des taches expose celles de la fixture`() {
         val app = demarrer()
         val projet = fixture("minimal-java")
+        val identifiant = nouvelId()
         app.envoyer(
             TasksRequest(
-                id = nouvelId(),
+                id = identifiant,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = projet.toString(),
             ),
         )
         val resultat = app.attendre(DELAI_BUILD, TasksResult::class)
+        assertEquals(
+            "la réponse doit échoyer l'identifiant de la requête (corrélation §3.2)",
+            identifiant,
+            resultat.id,
+        )
         assertTrue(
             "la tâche saluer devait être listée : ${resultat.tasks.joinToString { it.path }}",
             resultat.tasks.any { it.path.endsWith("saluer") },
@@ -272,14 +278,16 @@ class ServeurIntegrationTest {
     fun `la synchronisation resout les modeles du projet`() {
         val app = demarrer()
         val projet = fixture("minimal-java")
+        val identifiant = nouvelId()
         app.envoyer(
             SyncRequest(
-                id = nouvelId(),
+                id = identifiant,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = projet.toString(),
             ),
         )
         val resultat = app.attendre(DELAI_BUILD, SyncResult::class)
+        assertEquals("écho de l'identifiant de requête (corrélation §3.2)", identifiant, resultat.id)
         assertTrue("la synchronisation devait réussir : ${resultat.failureMessage}", resultat.succeeded)
     }
 
@@ -287,14 +295,16 @@ class ServeurIntegrationTest {
     fun `les dependances listent les modules relies`() {
         val app = demarrer()
         val projet = fixture("multi-module")
+        val identifiant = nouvelId()
         app.envoyer(
             DependenciesRequest(
-                id = nouvelId(),
+                id = identifiant,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = projet.toString(),
             ),
         )
         val resultat = app.attendre(DELAI_BUILD, DependenciesResult::class)
+        assertEquals("écho de l'identifiant de requête (corrélation §3.2)", identifiant, resultat.id)
         assertTrue(
             "la dépendance app → lib devait apparaître : ${resultat.dependencies.joinToString { it.module }}",
             resultat.dependencies.any { it.module == "lib" || it.module == ":lib" },
@@ -305,14 +315,16 @@ class ServeurIntegrationTest {
     fun `la resolution de modele repond par un SyncResult reussi`() {
         val app = demarrer()
         val projet = fixture("minimal-java")
+        val identifiant = nouvelId()
         app.envoyer(
             ModelRequest(
-                id = nouvelId(),
+                id = identifiant,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = projet.toString(),
             ),
         )
         val resultat = app.attendre(DELAI_BUILD, SyncResult::class)
+        assertEquals("écho de l'identifiant de requête (corrélation §3.2)", identifiant, resultat.id)
         assertTrue("le modèle devait se résoudre : ${resultat.failureMessage}", resultat.succeeded)
     }
 
@@ -379,12 +391,15 @@ class ServeurIntegrationTest {
     }
 }
 
-// Exemption detekt ciblée (règle 16) : SwallowedException — le fil lecteur
-// d'AppFactice se termine par construction sur une fin de flux (EOF) ou une
-// fermeture de canal (démontage du test) : ces exceptions SONT le signal de
-// fin attendu, les remonter ferait échouer des tests verts.
+/**
+ * L'app factice (serveur du socket côté test) et ses observations.
+ *
+ * Exemption detekt ciblée (règle 16) : SwallowedException — le fil lecteur
+ * se termine par construction sur une fin de flux (EOF) ou une fermeture
+ * de canal (démontage du test) : ces exceptions SONT le signal de fin
+ * attendu, les remonter ferait échouer des tests verts.
+ */
 @Suppress("SwallowedException")
-/** L'app factice (serveur du socket côté test) et ses observations. */
 private class AppFactice(
     private val cheminSocket: Path,
     private val secret: String,
