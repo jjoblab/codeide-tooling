@@ -72,7 +72,13 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                 // ExpiringTargetSdkVersion — l'app est chargée par
                 // side-loading, l'exigence Play ne s'applique pas, et le
                 // targetSdk 28 est délibéré pour l'exécution des binaires du
-                // bootstrap — ADR 0045).
+                // bootstrap — ADR 0045 ; ajout v0.31.3 : la version ERREUR
+                // ExpiredTargetSdkVersion — même décision, même ADR. Les DEUX
+                // ID doivent être désactivés : Expiring est le conseil
+                // (sévérité avertissement, monté en erreur par
+                // warningsAsErrors), Expired est l'erreur directe — la
+                // désactivation v0.31.1 n'a couvert que la première et la CI
+                // échouait sur :app:lintDebug depuis).
                 lint {
                     warningsAsErrors = true
                     abortOnError = true
@@ -80,6 +86,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     disable.add("GradleDependency")
                     disable.add("AndroidGradlePluginVersion")
                     disable.add("ExpiringTargetSdkVersion")
+                    disable.add("ExpiredTargetSdkVersion")
                 }
             }
 
