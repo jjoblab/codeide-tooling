@@ -4,6 +4,9 @@ import jo.codeide.tooling.protocol.BuildFinished
 import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.CancelRequest
+import jo.codeide.tooling.protocol.ClasspathKind
+import jo.codeide.tooling.protocol.ClasspathRequest
+import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.DependenciesRequest
 import jo.codeide.tooling.protocol.DependenciesResult
 import jo.codeide.tooling.protocol.Diagnostic
@@ -346,6 +349,45 @@ class ServeurIntegrationTest {
         assertTrue(
             "la dépendance app → lib devait apparaître : ${resultat.dependencies.joinToString { it.module }}",
             resultat.dependencies.any { it.module == "lib" || it.module == ":lib" },
+        )
+    }
+
+    @Test
+    fun `le classpath livre sources et dependances de chaque module - ADR 0058`() {
+        val app = demarrer()
+        val projet = fixture("multi-module")
+        val identifiant = nouvelId()
+        app.envoyer(
+            ClasspathRequest(
+                id = identifiant,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val resultat = app.attendre(DELAI_BUILD, ClasspathResult::class)
+        assertEquals("écho de l'identifiant de requête (corrélation §3.2)", identifiant, resultat.id)
+        assertEquals(projet.toString(), resultat.projectDir)
+
+        // Chaque module livre ses répertoires sources — la fixture
+        // multi-module porte app/src/main/java et lib/src/main/java.
+        val modulesParNom = resultat.modules.associateBy { it.name }
+        assertTrue(
+            "les modules app et lib devaient être livrés : ${resultat.modules.joinToString { it.name }}",
+            modulesParNom.keys.any { it.endsWith("app") } && modulesParNom.keys.any { it.endsWith("lib") },
+        )
+        val appModule = modulesParNom.values.first { it.name.endsWith("app") }
+        assertTrue(
+            "le répertoire source de app devait être livré : ${appModule.sourceDirs.joinToString()}",
+            appModule.sourceDirs.any { it.endsWith("app/src/main/java") },
+        )
+
+        // Le classpath compilé de app porte le module frère lib (les
+        // dépendances externes de la fixture : le JDK, hors périmètre
+        // LSP des sources du projet).
+        assertTrue(
+            "la dépendance app → lib devait être dans le classpath : " +
+                appModule.entries.joinToString { "${it.path} (${it.kind})" },
+            appModule.entries.any { it.kind == ClasspathKind.MODULE && (it.path.endsWith("lib")) },
         )
     }
 

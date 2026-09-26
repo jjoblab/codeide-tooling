@@ -28,6 +28,7 @@ internal object EchantillonsMessages {
             SyncRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo", gradleVersion = "9.7.1"),
             TasksRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             DependenciesRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
+            ClasspathRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             ModelRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             CancelRequest(ID_REQUETE, VERSION, buildId = "build-7"),
             HeapRequest(ID_REQUETE, VERSION),
@@ -81,6 +82,37 @@ internal object EchantillonsMessages {
                         DependencyInfo(
                             module = "org.jetbrains.kotlin:kotlin-stdlib",
                             configuration = "implementation",
+                        ),
+                    ),
+            ),
+            ClasspathResult(
+                ID_EVENEMENT,
+                VERSION,
+                projectDir = "/projets/demo",
+                modules =
+                    listOf(
+                        ClasspathModule(
+                            name = ":app",
+                            sourceDirs = listOf("/projets/demo/app/src/main/java"),
+                            entries =
+                                listOf(
+                                    ClasspathEntry(path = ":lib", kind = ClasspathKind.MODULE, scope = "compile"),
+                                    ClasspathEntry(
+                                        path =
+                                            "/cache/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/" +
+                                                "kotlin-stdlib-2.2.10.jar",
+                                        kind = ClasspathKind.JAR,
+                                        scope = "compile",
+                                        sources =
+                                            "/cache/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/" +
+                                                "kotlin-stdlib-2.2.10-sources.jar",
+                                    ),
+                                    ClasspathEntry(
+                                        path = "/cache/modules-2/files-2.1/androidx.core/core/1.17.0/core-1.17.0.aar",
+                                        kind = ClasspathKind.AAR,
+                                        scope = "compile",
+                                    ),
+                                ),
                         ),
                     ),
             ),

@@ -1,6 +1,8 @@
 package jo.codeide.tooling.client
 
+import jo.codeide.core.domain.ClasspathProjet
 import jo.codeide.core.domain.DiagnosticBuild
+import jo.codeide.core.domain.EntreeClasspath
 import jo.codeide.core.domain.EtatBuild
 import jo.codeide.core.domain.EtatConnexion
 import jo.codeide.core.domain.EtatSyncTooling
@@ -9,9 +11,11 @@ import jo.codeide.core.domain.GradleToolingRepository
 import jo.codeide.core.domain.InfoTache
 import jo.codeide.core.domain.InstantaneTas
 import jo.codeide.core.domain.LigneSortieBuild
+import jo.codeide.core.domain.ModuleClasspath
 import jo.codeide.core.domain.ResultatSynchronisation
 import jo.codeide.core.domain.SeveriteDiagnostic
 import jo.codeide.core.domain.StatutBuild
+import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
@@ -20,6 +24,10 @@ import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.BuildStarted
 import jo.codeide.tooling.protocol.CancelRequest
+import jo.codeide.tooling.protocol.ClasspathEntry
+import jo.codeide.tooling.protocol.ClasspathKind
+import jo.codeide.tooling.protocol.ClasspathRequest
+import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.DependenciesResult
 import jo.codeide.tooling.protocol.Diagnostic
 import jo.codeide.tooling.protocol.DiagnosticSeverity
@@ -294,6 +302,10 @@ class GradleApiImpl
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 
+                is ClasspathResult -> {
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
                 is ErrorResponse -> {
                     promesses.remove(evenement.requestId)?.complete(evenement)
                 }
@@ -404,6 +416,33 @@ class GradleApiImpl
                             InfoTache(chemin = tache.path, groupe = tache.group, nomAffiche = tache.displayName)
                         },
                     )
+                }
+
+                is ErrorResponse -> {
+                    AppResult.Failure(reponse.versErreurDomaine())
+                }
+
+                else -> {
+                    AppResult.Failure(
+                        AppError.Tooling(ToolingReason.Internal, "réponse inattendue : ${reponse::class.simpleName}"),
+                    )
+                }
+            }
+        }
+
+        override suspend fun classpath(projectDir: File): AppResult<ClasspathProjet> {
+            val reponse =
+                echanger(
+                    ClasspathRequest(
+                        id = nouvelIdentifiant(),
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        projectDir = projectDir.canonicalPath,
+                    ),
+                    delaiMs = DELAI_CLASSPATH_MS,
+                ) ?: return echecConnexion()
+            return when (reponse) {
+                is ClasspathResult -> {
+                    AppResult.Success(reponse.versClasspathDomaine())
                 }
 
                 is ErrorResponse -> {
@@ -633,6 +672,34 @@ class GradleApiImpl
                 source = source,
             )
 
+        /** Traduit un classpath du protocole vers le domaine (ADR 0058). */
+        private fun ClasspathResult.versClasspathDomaine(): ClasspathProjet =
+            ClasspathProjet(
+                projectDir = projectDir,
+                modules =
+                    modules.map { module ->
+                        ModuleClasspath(
+                            nom = module.name,
+                            dossiersSources = module.sourceDirs,
+                            entrees =
+                                module.entries.map { entree ->
+                                    EntreeClasspath(
+                                        chemin = entree.path,
+                                        type =
+                                            when (entree.kind) {
+                                                ClasspathKind.JAR -> TypeEntreeClasspath.JAR
+                                                ClasspathKind.AAR -> TypeEntreeClasspath.AAR
+                                                ClasspathKind.DOSSIER -> TypeEntreeClasspath.DOSSIER
+                                                ClasspathKind.MODULE -> TypeEntreeClasspath.MODULE
+                                            },
+                                        portee = entree.scope,
+                                        sources = entree.sources,
+                                    )
+                                },
+                        )
+                    },
+            )
+
         private fun ErrorResponse.versErreurDomaine(): AppError.Tooling =
             AppError.Tooling(
                 code =
@@ -659,5 +726,8 @@ class GradleApiImpl
             /** Délais client des requêtes-réponses (§7.5). */
             const val DELAI_SYNC_MS: Long = 5 * 60_000L
             const val DELAI_TACHES_MS: Long = 30_000L
+
+            /** Délai client du classpath LSP (ADR 0058, aligné serveur). */
+            const val DELAI_CLASSPATH_MS: Long = 5 * 60_000L
         }
     }

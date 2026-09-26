@@ -4,6 +4,7 @@ import jo.codeide.core.domain.EtatConnexion
 import jo.codeide.core.domain.FluxSortieBuild
 import jo.codeide.core.domain.LigneSortieBuild
 import jo.codeide.core.domain.StatutBuild
+import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
@@ -12,6 +13,11 @@ import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.BuildStarted
 import jo.codeide.tooling.protocol.CancelRequest
+import jo.codeide.tooling.protocol.ClasspathEntry
+import jo.codeide.tooling.protocol.ClasspathKind
+import jo.codeide.tooling.protocol.ClasspathModule
+import jo.codeide.tooling.protocol.ClasspathRequest
+import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
 import jo.codeide.tooling.protocol.GradleProtocol
@@ -171,6 +177,61 @@ class GradleApiImplTest {
             assertEquals(":app:build", taches[1].chemin)
             assertEquals("build", taches[1].groupe)
             assertEquals("saluer", taches[0].nomAffiche)
+        }
+
+    @Test
+    fun `le classpath traverse avec sources, aar et module frère - ADR 0058`() =
+        runBlocking {
+            val session =
+                SessionFactice { requete, soi ->
+                    if (requete is ClasspathRequest) {
+                        soi.emettre(
+                            ClasspathResult(
+                                id = requete.id,
+                                protocolVersion = protocole,
+                                projectDir = requete.projectDir,
+                                modules =
+                                    listOf(
+                                        ClasspathModule(
+                                            name = ":app",
+                                            sourceDirs = listOf("/p/app/src/main/java"),
+                                            entries =
+                                                listOf(
+                                                    ClasspathEntry(
+                                                        path = ":lib",
+                                                        kind = ClasspathKind.MODULE,
+                                                        scope = "compile",
+                                                    ),
+                                                    ClasspathEntry(
+                                                        path = "/cache/kotlin-stdlib.jar",
+                                                        kind = ClasspathKind.JAR,
+                                                        scope = "compile",
+                                                        sources = "/cache/kotlin-stdlib-sources.jar",
+                                                    ),
+                                                    ClasspathEntry(path = "/cache/core.aar", kind = ClasspathKind.AAR),
+                                                ),
+                                        ),
+                                    ),
+                            ),
+                        )
+                    }
+                }
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+
+            val resultat = api.classpath(File("/p"))
+            assertTrue(resultat is AppResult.Success)
+            val classpath = (resultat as AppResult.Success).value
+            assertEquals("/p", classpath.projectDir)
+            assertEquals(1, classpath.modules.size)
+            val module = classpath.modules.first()
+            assertEquals(":app", module.nom)
+            assertEquals(listOf("/p/app/src/main/java"), module.dossiersSources)
+            assertEquals(TypeEntreeClasspath.MODULE, module.entrees[0].type)
+            assertEquals(":lib", module.entrees[0].chemin)
+            assertEquals(TypeEntreeClasspath.JAR, module.entrees[1].type)
+            assertEquals("/cache/kotlin-stdlib-sources.jar", module.entrees[1].sources)
+            assertEquals(TypeEntreeClasspath.AAR, module.entrees[2].type)
         }
 
     @Test

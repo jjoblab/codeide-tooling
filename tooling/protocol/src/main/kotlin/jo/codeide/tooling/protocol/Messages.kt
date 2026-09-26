@@ -335,6 +335,96 @@ public data class ModelRequest(
 ) : ToolingRequest
 
 // ---------------------------------------------------------------------------
+// Classpaths (ADR 0058 — préparation LSP, comme Android Studio prépare
+// l'index du projet à la sync).
+// ---------------------------------------------------------------------------
+
+/**
+ * Type d'une entrée de classpath (ADR 0058) : ce que les LSP trouveront
+ * sur leur chemin — bytecode compilé (jar), bibliothèque Android (aar),
+ * dossier de classes ou module frère porté par son nom.
+ */
+@Serializable
+public enum class ClasspathKind {
+    /** Archive JAR (bytecode compilé). */
+    @SerialName("jar")
+    JAR,
+
+    /** Archive AAR Android (bytecode + ressources). */
+    @SerialName("aar")
+    AAR,
+
+    /** Dossier de classes (sortie d'un module ou dossier exposé). */
+    @SerialName("dossier")
+    DOSSIER,
+
+    /** Dépendance vers un module frère (résolu par son nom). */
+    @SerialName("module")
+    MODULE,
+}
+
+/**
+ * Demande le classpath compilé de chaque module du projet (ADR 0058) :
+ * répertoires sources et entrées de classpath — le client l'émet juste
+ * après une sync réussie puis PERSISTE la réponse pour que les LSP s'en
+ * servent le moment venu, comme Android Studio prépare son index.
+ */
+@Serializable
+@SerialName("classpath_request")
+public data class ClasspathRequest(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+) : ToolingRequest
+
+/**
+ * Une entrée du classpath d'un module (ADR 0058) : chemin du jar, de
+ * l'AAR, du dossier de classes — ou NOM du module frère quand
+ * [kind] vaut [ClasspathKind.MODULE] ; [sources] porte le jar de
+ * sources attaché quand Gradle le connaît.
+ *
+ * @property path fichier/dossier concerné, ou nom du module frère.
+ * @property kind nature de l'entrée.
+ * @property scope portée de la dépendance (`compile`, `test`…), si connue.
+ * @property sources jar de sources attaché, `null` si aucun.
+ */
+@Serializable
+@SerialName("classpath_entry")
+public data class ClasspathEntry(
+    public val path: String,
+    public val kind: ClasspathKind,
+    public val scope: String? = null,
+    public val sources: String? = null,
+)
+
+/**
+ * Classpath d'UN module (ADR 0058) : répertoires sources (le module
+ * et ses tests) et entrées compilées — assez pour qu'un LSP compile,
+ * complète et navigue.
+ *
+ * @property name nom du module Gradle (ex. `:app`).
+ * @property sourceDirs répertoires sources absolus.
+ * @property entries entrées du classpath compilé.
+ */
+@Serializable
+@SerialName("classpath_module")
+public data class ClasspathModule(
+    public val name: String,
+    public val sourceDirs: List<String>,
+    public val entries: List<ClasspathEntry>,
+)
+
+/** Réponse de [ClasspathRequest] : classpath de chaque module du projet. */
+@Serializable
+@SerialName("classpath_result")
+public data class ClasspathResult(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val modules: List<ClasspathModule>,
+) : ToolingEvent
+
+// ---------------------------------------------------------------------------
 // Surveillance (§4.6) et santé.
 // ---------------------------------------------------------------------------
 

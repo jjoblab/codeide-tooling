@@ -2,6 +2,7 @@ package jo.codeide.tooling.server
 
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.CancelRequest
+import jo.codeide.tooling.protocol.ClasspathRequest
 import jo.codeide.tooling.protocol.DependenciesRequest
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
@@ -51,6 +52,7 @@ internal class MessageDispatcher(
     private val taches = TasksHandler(pool, bus)
     private val modeles = ModelHandler(pool, bus)
     private val dependances = DependenciesHandler(pool, bus)
+    private val classpaths = ClasspathHandler(pool, bus)
     private val tas = HeapMonitor(bus)
 
     /** Boucle de réception — retourne à la fin de connexion. */
@@ -93,28 +95,13 @@ internal class MessageDispatcher(
                     traiterAnnulation(requete)
                 }
 
-                is SyncRequest -> {
-                    avecDelai(TimeoutsServeur.SYNC_MS, requete.id) {
-                        synchronisations.synchroniser(requete)
-                    }
-                }
-
-                is TasksRequest -> {
-                    avecDelai(TimeoutsServeur.TACHES_MS, requete.id) {
-                        taches.taches(requete)
-                    }
-                }
-
-                is DependenciesRequest -> {
-                    avecDelai(TimeoutsServeur.DEPENDANCES_MS, requete.id) {
-                        dependances.dependances(requete)
-                    }
-                }
-
-                is ModelRequest -> {
-                    avecDelai(TimeoutsServeur.MODELE_MS, requete.id) {
-                        modeles.modele(requete)
-                    }
+                is SyncRequest,
+                is TasksRequest,
+                is DependenciesRequest,
+                is ClasspathRequest,
+                is ModelRequest,
+                -> {
+                    traiterModeles(requete)
                 }
 
                 is HeapRequest -> {
@@ -156,6 +143,50 @@ internal class MessageDispatcher(
                 ErrorCode.INTERNAL_ERROR,
                 "aucun build actif ne porte l'identifiant ${requete.buildId}",
             )
+        }
+    }
+
+    /**
+     * Aiguillage des requêtes de MODÈLES (§5.3 : sync résiliente, tâches,
+     * dépendances, classpath LSP ADR 0058, modèle brut) — chacune sous SA
+     * garde de délai (§7.5).
+     */
+    private suspend fun traiterModeles(requete: ToolingRequest) {
+        when (requete) {
+            is SyncRequest -> {
+                avecDelai(TimeoutsServeur.SYNC_MS, requete.id) {
+                    synchronisations.synchroniser(requete)
+                }
+            }
+
+            is TasksRequest -> {
+                avecDelai(TimeoutsServeur.TACHES_MS, requete.id) {
+                    taches.taches(requete)
+                }
+            }
+
+            is DependenciesRequest -> {
+                avecDelai(TimeoutsServeur.DEPENDANCES_MS, requete.id) {
+                    dependances.dependances(requete)
+                }
+            }
+
+            is ClasspathRequest -> {
+                avecDelai(TimeoutsServeur.CLASSPATH_MS, requete.id) {
+                    classpaths.classpath(requete)
+                }
+            }
+
+            is ModelRequest -> {
+                avecDelai(TimeoutsServeur.MODELE_MS, requete.id) {
+                    modeles.modele(requete)
+                }
+            }
+
+            else -> {
+                // Inatteignable : [traiter] a déjà filtré la famille entière.
+                Unit
+            }
         }
     }
 

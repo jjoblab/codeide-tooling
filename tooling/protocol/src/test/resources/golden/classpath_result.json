@@ -1,0 +1,34 @@
+{
+  "type": "classpath_result",
+  "id": "evt-43",
+  "protocolVersion": 2,
+  "projectDir": "/projets/demo",
+  "modules": [
+    {
+      "name": ":app",
+      "sourceDirs": [
+        "/projets/demo/app/src/main/java"
+      ],
+      "entries": [
+        {
+          "path": ":lib",
+          "kind": "module",
+          "scope": "compile",
+          "sources": null
+        },
+        {
+          "path": "/cache/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/kotlin-stdlib-2.2.10.jar",
+          "kind": "jar",
+          "scope": "compile",
+          "sources": "/cache/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/kotlin-stdlib-2.2.10-sources.jar"
+        },
+        {
+          "path": "/cache/modules-2/files-2.1/androidx.core/core/1.17.0/core-1.17.0.aar",
+          "kind": "aar",
+          "scope": "compile",
+          "sources": null
+        }
+      ]
+    }
+  ]
+}

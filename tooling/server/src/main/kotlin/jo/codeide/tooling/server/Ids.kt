@@ -22,6 +22,9 @@ internal object TimeoutsServeur {
     /** Délai maximal du graphe de dépendances. */
     const val DEPENDANCES_MS: Long = 30_000L
 
+    /** Délai maximal de résolution du classpath LSP (ADR 0058). */
+    const val CLASSPATH_MS: Long = 5 * 60_000L
+
     /** Délai maximal de résolution d'un modèle de projet. */
     const val MODELE_MS: Long = 5 * 60_000L
 }
