@@ -145,9 +145,10 @@ class BoutEnBoutTest {
             fabriqueCommande = { java, _, cheminSocket, secret ->
                 listOf(
                     java.absolutePath,
-                    // Tas borné (production : 256 Mio — même discipline en
-                    // test, la machine de CI n'a que 4 Go).
-                    "-Xmx256m",
+                    // Tas borné — MÊME constante que la production (le nu
+                    // sans suffixe est des octets, ADR 0062 : v0.35.1 tuait
+                    // la VM sur l'appareil), la machine de CI n'a que 4 Go.
+                    "-Xmx${TAS_MO}m",
                     "-cp",
                     System.getProperty("java.class.path"),
                     CLASSE_ORCHESTRATEUR,

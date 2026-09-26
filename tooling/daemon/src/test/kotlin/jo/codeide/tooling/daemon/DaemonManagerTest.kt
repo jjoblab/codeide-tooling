@@ -277,7 +277,7 @@ class DaemonManagerTest {
             assertEquals(
                 listOf(
                     "/outils/jdk/bin/java",
-                    "-Xmx${TAS_MO}",
+                    "-Xmx${TAS_MO}m",
                     "-jar",
                     "/donnees/files/tooling/gradle-server.jar",
                     "--socket",
@@ -290,6 +290,30 @@ class DaemonManagerTest {
                 commande,
             )
         }
+
+    @Test
+    fun `l argument de tas de la commande production est accepte par une vraie JVM`() {
+        // Régression v0.35.1 (journal de terrain, moto g06) : « -Xmx256 »
+        // NU est lu en OCTETS (256 o < minimum de la VM) — « Error occurred
+        // during initialization of VM / Too small maximum heap », la VM ne
+        // rejoignait JAMAIS l'écoute, cinq relances pour rien. Les tests
+        // écrivaient le drapeau à la main avec le suffixe, la production
+        // l'omettait — la VRAIE JVM fait seule autorité pour refuser une
+        // taille invalide AVANT l'appareil.
+        val java = File(System.getProperty("java.home"), "bin/java")
+        assertTrue("binaire java du JDK de test introuvable : $java", java.isFile)
+        val tas =
+            commandeParDefaut()
+                .invoke(java, File("/outils/gradle-server.jar"), File("/run/gradle.sock"), "secret-de-test")
+                .first { it.startsWith("-Xmx") }
+        val process =
+            ProcessBuilder(java.absolutePath, tas, "-version")
+                .redirectErrorStream(true)
+                .start()
+        val sortie = process.inputStream.bufferedReader().use { it.readText() }
+        val code = process.waitFor()
+        assertEquals("la JVM des tests refusait « $tas » : $sortie", 0, code)
+    }
 
     @Test
     fun `un JAR indisponible est un echec definitif sans lancement`() =

@@ -12,5 +12,5 @@ public object ServerVersion {
     /** Version courante de l'orchestrateur (v0.35.1 : accept du socket
      * réveillé + stderr journalisé pendant la fenêtre de connexion —
      * ADR 0061). */
-    public const val CURRENT: String = "0.35.1"
+    public const val CURRENT: String = "0.35.2"
 }

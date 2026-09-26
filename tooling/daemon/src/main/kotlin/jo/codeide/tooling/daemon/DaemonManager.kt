@@ -407,12 +407,20 @@ class DaemonManager
  * vivent dans le daemon Gradle), il orchestre la Tooling API et route le
  * protocole — 256 Mio couvrent largement, et un process invasif sur un
  * téléphone reste inacceptable.
+ *
+ * ⚠ Suffixe d'unité OBLIGATOIRE (ADR 0062) : sans suffixe, la JVM lit un
+ * nu d'OCTETS — `-Xmx256` = 256 o, sous le minimum de la VM →
+ * « Too small maximum heap », mort avant toute connexion (journal de
+ * terrain v0.35.1 : la VM ne démarrait jamais, cinq relances pour rien).
+ * La taille est apposée avec son suffixe `m` et le test
+ * `l argument de tas de la commande production est accepte par une vraie
+ * JVM` rejoue le refus des tailles invalides contre une VRAIE JVM.
  */
 internal fun commandeParDefaut(): (java: File, jar: File, cheminSocket: File, secret: String) -> List<String> =
     { java: File, jar: File, cheminSocket: File, secret: String ->
         listOf(
             java.absolutePath,
-            "-Xmx$TAS_MO",
+            "-Xmx${TAS_MO}m",
             "-jar",
             jar.absolutePath,
             "--socket",
@@ -424,5 +432,9 @@ internal fun commandeParDefaut(): (java: File, jar: File, cheminSocket: File, se
         )
     }
 
-/** Tas maximum du process orchestrateur (Mio). */
+/**
+ * Tas maximum du process orchestrateur (Mio) — TOUJOURS apposé avec son
+ * suffixe d'unité `m` dans la commande (ADR 0062) : un nu seul serait lu
+ * en octets par la JVM.
+ */
 internal const val TAS_MO = 256

@@ -167,7 +167,9 @@ class ChaosToolingTest {
             fabriqueCommande = { java, _, cheminSocket, secret ->
                 listOf(
                     java.absolutePath,
-                    "-Xmx256m",
+                    // Même discipline que la production (ADR 0062) :
+                    // suffixe d'unité OBLIGATOIRE, nu = octets.
+                    "-Xmx${TAS_MO}m",
                     "-cp",
                     System.getProperty("java.class.path"),
                     CLASSE_ORCHESTRATEUR,
