@@ -9,7 +9,8 @@ package jo.codeide.tooling.server
  * version de livraison de chaque étape (ADR 0040).
  */
 public object ServerVersion {
-    /** Version courante de l'orchestrateur (v0.35.0 : palettes de
-     * couleurs + tiroir M3 + correctifs apparence — ADR 0060). */
-    public const val CURRENT: String = "0.35.0"
+    /** Version courante de l'orchestrateur (v0.35.1 : accept du socket
+     * réveillé + stderr journalisé pendant la fenêtre de connexion —
+     * ADR 0061). */
+    public const val CURRENT: String = "0.35.1"
 }

@@ -26,10 +26,14 @@ internal interface HoteSocketTooling {
      * Attend UNE connexion et négocie le handshake.
      *
      * @param secretAttendu secret généré pour CE démarrage du daemon.
-     * @param delaiMs délai d'attente de la connexion (`CONNECT_TIMEOUT_MS`).
+     * @param delaiMs délai d'attente de la connexion (fenêtre du daemon,
+     * lancement de la JVM compris — l'hôte production réveille son
+     * accept non interruptible au terme du délai, ADR 0061).
      * @return session validée, prête à être pompée.
      * @throws jo.codeide.tooling.client.EchecHandshakeClient secret
      * invalide, version incompatible ou réponse inattendue.
+     * @throws java.io.IOException délai expiré sans connexion de
+     * l'orchestrateur, ou écoute défaillante — tentative consommable.
      */
     suspend fun accepterUneFois(
         secretAttendu: String,

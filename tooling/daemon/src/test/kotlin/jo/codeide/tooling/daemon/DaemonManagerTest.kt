@@ -126,6 +126,44 @@ class DaemonManagerTest {
         }
 
     @Test
+    fun `le stderr est journalise pendant la fenetre de connexion meme sans session`() =
+        runBlocking {
+            // ADR 0061 : l'hôte production (accept non interruptible réveillé)
+            // lève IOException sans jamais ouvrir de session — le stderr de
+            // l'orchestrateur doit pourtant être journalisé : c'est lui qui
+            // explique l'échec (v0.35.0 : personne ne lisait le tuyau pendant
+            // la fenêtre de connexion, échec muet).
+            hote.echecConnexion =
+                java.io.IOException("orchestrateur silencieux à la connexion (délai de 30000 ms)")
+            lanceur.fabrique =
+                { ProcessusMaitrise(lignesStderr = listOf("connexion au socket impossible : cause terrain")) }
+            nouveauDaemon().demarrerEnTest()
+
+            attendreQue {
+                journal.entries.any { it.tag == "gradle-server" && it.message.contains("cause terrain") }
+            }
+            // La boucle a bien consommé la tentative et relancé.
+            attendreQue { lanceur.lancements.size >= 2 }
+        }
+
+    @Test
+    fun `un echec de connexion IO de l hote est consomme puis epuise les tentatives`() =
+        runBlocking {
+            // L'hôte production traduit le délai expiré en IOException typée
+            // (ADR 0061) : le daemon la remonte TELLE QUELLE, consomme une
+            // tentative par échec et finit ECHOUEE après épuisement.
+            hote.echecConnexion =
+                java.io.IOException("orchestrateur silencieux à la connexion (délai de 30000 ms)")
+            lanceur.fabrique = { ProcessusMaitrise() }
+            nouveauDaemon().demarrerEnTest()
+
+            attendreQue { api.etatConnexion == EtatConnexion.ECHOUEE }
+            assertEquals(GradleProtocol.MAX_RECONNECT_ATTEMPTS, lanceur.lancements.size)
+            assertTrue(journal.entries.any { it.message.contains("lancement impossible") })
+            assertTrue(journal.entries.any { it.message.contains("orchestrateur silencieux à la connexion") })
+        }
+
+    @Test
     fun `la mort du process declenche une relance avec un secret neuf`() =
         runBlocking {
             val premiere = ProcessusMaitrise()
@@ -322,7 +360,8 @@ class DaemonManagerTest {
 
 /**
  * Hôte de socket factice : enregistre l'ordre des appels (§5.1), sert les
- * sessions programmées, capture les secrets reçus, peut refuser.
+ * sessions programmées, capture les secrets reçus, peut refuser ou
+ * simuler l'échec de connexion typé de l'hôte production (ADR 0061).
  */
 private class HoteSocketFactice : HoteSocketTooling {
     val ordre = CopyOnWriteArrayList<String>()
@@ -331,6 +370,12 @@ private class HoteSocketFactice : HoteSocketTooling {
 
     /** Quand non nul, accepterUneFois lève cette exception (handshake refusé). */
     var refus: EchecHandshakeClient? = null
+
+    /**
+     * Quand non nul, accepterUneFois lève cet échec de connexion IO —
+     * miroir du délai expiré réveillé de l'hôte production (ADR 0061).
+     */
+    var echecConnexion: java.io.IOException? = null
 
     override val cheminSocket: File = File(dossierTemporaire("sockets"), GradleProtocol.SOCKET_NAME)
 
@@ -347,6 +392,7 @@ private class HoteSocketFactice : HoteSocketTooling {
         delaiMs: Long,
     ): SessionTooling {
         secretsRecus += secretAttendu
+        echecConnexion?.let { throw it }
         refus?.let { throw it }
         return synchronized(sessions) { sessions.removeFirstOrNull() }
             ?: SessionFacticeDaemon(pongAuto = true)

@@ -4,11 +4,17 @@ import jo.codeide.tooling.protocol.FrameCodec
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.HelloRequest
 import jo.codeide.tooling.protocol.ProtocolJson
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.runInterruptible
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import java.io.File
+import java.io.IOException
 
 /**
  * Écoute du socket de l'orchestrateur (§5.1) : **l'app est le serveur** —
@@ -92,21 +98,56 @@ class GradleSocketServer(
      * [HandshakeApp.valider] — AUCUNE requête n'atteint un handler avant
      * validation du secret (§4.4).
      *
+     * Le `accept()` d'`android.net.LocalServerSocket` n'est PAS
+     * interruptible (libcore, contrairement aux canaux NIO interruptibles
+     * de l'hôte JVM des tests) : un simple
+     * `withTimeout { runInterruptible { serveur.accept() } }` ne revient
+     * JAMAIS tant que personne ne se connecte — gel silencieux constaté
+     * sur le terrain en v0.35.0 (daemon figé, aucune relance, aucun
+     * diagnostic). L'accept vit donc dans un job détaché, attendu sous
+     * [delaiMs] ; au délai, un client FACTICE rejoint l'écoute pour
+     * DÉBLOQUER le fil bloqué (le noyau complète sa connexion dans le
+     * backlog : `accept(2)` rend la main — seul réveil garanti), ce que
+     * le fil a fini par accepter est refermé, puis l'échec typé
+     * [IOException] remonte au daemon qui consomme la tentative et
+     * relance (ADR 0061).
+     *
+     * Exemption detekt ciblée (règle 16) : ThrowsCount — chaque `throw`
+     * porte une cause DIFFÉRENTE (délai expiré, première frame illisible,
+     * première frame inattendue) avec son traitement propre ; même
+     * justification que le Handshake de G2.
+     *
      * @param secretAttendu secret généré par l'app pour CE démarrage.
-     * @param delaiMs délai d'attente de la connexion (§3.4
-     * `CONNECT_TIMEOUT_MS`).
+     * @param delaiMs délai d'attente de la connexion (fenêtre du daemon,
+     * lancement de la JVM compris).
      * @throws EchecHandshakeClient secret invalide, version incompatible
      * ou réponse inattendue — l'orchestrateur a été informé puis fermé.
+     * @throws IOException délai expiré sans connexion de l'orchestrateur,
+     * ou écoute défaillante — la tentative est consommable par le daemon.
      */
+    @Suppress("ThrowsCount")
     suspend fun accepterUneFois(
         secretAttendu: String,
         delaiMs: Long,
     ): SessionTooling {
         val serveur = requireNotNull(this.serveur) { "ouvrir() n'a pas été appelé" }
+
+        val porteeAccept = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+        val acceptation: Deferred<Result<android.net.LocalSocket>> =
+            porteeAccept.async { runCatching { serveur.accept() } }
         val canal =
-            withTimeout(delaiMs) {
-                runInterruptible(Dispatchers.IO) { serveur.accept() }
+            try {
+                withTimeout(delaiMs) { acceptation.await().getOrThrow() }
+            } catch (delai: TimeoutCancellationException) {
+                rejeterAcceptEnRetard(acceptation)
+                throw IOException(
+                    "orchestrateur silencieux à la connexion (délai de $delaiMs ms)",
+                    delai,
+                )
+            } finally {
+                porteeAccept.cancel()
             }
+
         val session = SessionSocketAndroid(canal)
 
         // Première frame : obligatoirement le HelloRequest de
@@ -134,6 +175,40 @@ class GradleSocketServer(
 
         HandshakeApp.valider(session, premiere, secretAttendu, versionApp)
         return session
+    }
+
+    /**
+     * Réveille l'accept bloqué d'un délai expiré : un client factice
+     * rejoint l'écoute (le noyau complète sa connexion dans le backlog —
+     * `accept(2)` rend la main, seul réveil garanti d'un appel non
+     * interruptible) et ce que le fil a fini par accepter (le factice,
+     * ou l'orchestrateur trop tardif) est refermé — la tentative est
+     * consommée, la relance partira sur un secret frais.
+     *
+     * Best effort borné : un réveil impossible n'entrave PAS la remontée
+     * de l'échec au daemon (le fil restant bloqué sur une écoute que le
+     * daemon referme de toute façon).
+     */
+    private suspend fun rejeterAcceptEnRetard(acceptation: Deferred<Result<android.net.LocalSocket>>) {
+        runCatching {
+            android.net.LocalSocket().apply {
+                connect(
+                    android.net.LocalSocketAddress(
+                        cheminSocket.absolutePath,
+                        android.net.LocalSocketAddress.Namespace.FILESYSTEM,
+                    ),
+                )
+                close()
+            }
+        }
+        runCatching {
+            withTimeout(REVEIL_ACCEPT_MS) { acceptation.await() }
+        }.getOrNull()?.getOrNull()?.close()
+    }
+
+    private companion object {
+        /** Délai du réveil borné de l'accept bloqué (le factice est immédiat). */
+        const val REVEIL_ACCEPT_MS: Long = 1_000L
     }
 
     /** Referme l'écoute (idempotent — le socket fichier est retiré). */

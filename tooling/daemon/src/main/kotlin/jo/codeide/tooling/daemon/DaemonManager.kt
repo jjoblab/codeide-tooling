@@ -187,12 +187,19 @@ class DaemonManager
          * Une tentative complète : déploie, écoute, lance, accepte,
          * surveille (santé + sorties) jusqu'à la mort du process.
          *
+         * Les sorties du process sont branchées au journal DÈS le
+         * lancement — AVANT l'accept : une JVM qui meurt avant de se
+         * connecter (exec refusé, manifeste, tas, SELinux…) explique SON
+         * échec sur stderr, invisible sinon (v0.35.0 : personne ne lisait
+         * le tuyau pendant la fenêtre de connexion — échec muet).
+         *
          * @return `true` pour un échec DÉFINITIF (sans nouvelle tentative).
          *
          * Exemption detekt ciblée (règle 16) : ThrowsCount — chaque `throw`
          * distingue une cause DIFFÉRENTE (délai de connexion, annulation de
-         * la surveillance, refus de handshake, échec non typé) avec son
-         * traitement propre ; même justification que le Handshake de G2.
+         * la surveillance, refus de handshake, échec IO de l'hôte, échec
+         * non typé) avec son traitement propre ; même justification que
+         * le Handshake de G2.
          */
         @Suppress("ThrowsCount")
         private suspend fun tentative(java: File): Boolean {
@@ -217,16 +224,23 @@ class DaemonManager
             journal.d(TAG) { "orchestrateur lancé (pid ${process.pid}) sur ${hote.cheminSocket}" }
 
             val porteeTentative = CoroutineScope(SupervisorJob() + dispatchers.default)
+            // Sorties branchées AVANT l'accept : l'orchestrateur qui meurt
+            // ou échoue avant de se connecter s'explique LUI-MÊME sur stderr
+            // (règle 14, ADR 0040) — journalisées sous le tag dédié dès leur
+            // émission, session ou pas.
+            brancherSorties(process, porteeTentative)
+
             val session: SessionTooling
             try {
-                session = hote.accepterUneFois(secret, GradleProtocol.CONNECT_TIMEOUT_MS)
+                session = hote.accepterUneFois(secret, FENETRE_CONNEXION_MS)
             } catch (delai: TimeoutCancellationException) {
-                // L'orchestrateur n'a jamais joint l'écoute dans le délai :
-                // tentative consommable (IOException), le process mort seul
-                // est nettoyé tout de suite.
+                // L'orchestrateur n'a jamais joint l'écoute dans le délai
+                // (hôte JVM de test, canal NIO interruptible) : tentative
+                // consommable (IOException), le process mort seul est
+                // nettoyé tout de suite.
                 nettoyerApresConnexionManquee(process, hote, porteeTentative)
                 throw IOException(
-                    "orchestrateur silencieux à la connexion (délai de ${GradleProtocol.CONNECT_TIMEOUT_MS} ms)",
+                    "orchestrateur silencieux à la connexion (délai de $FENETRE_CONNEXION_MS ms)",
                     delai,
                 )
             } catch (refus: EchecHandshakeClient) {
@@ -239,6 +253,13 @@ class DaemonManager
                 // hôte morte) : TOUJOURS relancée telle quelle (règle 6).
                 nettoyerApresConnexionManquee(process, hote, porteeTentative)
                 throw annulation
+            } catch (silencieux: IOException) {
+                // Échec de connexion typé par l'hôte production (accept non
+                // interruptible réveillé, ADR 0061) : nettoyage puis remontée
+                // TELLE QUELLE — le message est déjà précis, la boucle
+                // consomme une tentative comme un lancement impossible.
+                nettoyerApresConnexionManquee(process, hote, porteeTentative)
+                throw silencieux
             } catch (perdu: Throwable) {
                 nettoyerApresConnexionManquee(process, hote, porteeTentative)
                 throw IOException("aucune connexion de l'orchestrateur : ${perdu.message}", perdu)
@@ -247,7 +268,7 @@ class DaemonManager
             api.ouvrirSession(session)
             journal.i(TAG) { "orchestrateur connecté (jar ${jar.name})" }
 
-            val surveillanceSante = brancherSurveillance(process, session, porteeTentative)
+            val surveillanceSante = porteeTentative.launch { sonderSante(process, session) }
             try {
                 val code = process.awaitExit()
                 journal.i(TAG) { "orchestrateur arrêté (code $code)" }
@@ -268,19 +289,16 @@ class DaemonManager
         }
 
         /**
-         * Branche les sorties du process au journal applicatif et démarre
-         * la surveillance de santé — retourne le job de santé (annulable).
-         *
-         * Sorties du process = son journal (règle 14, ADR 0040) : stderr
+         * Branche les sorties du process au journal applicatif (règle 14,
+         * ADR 0040) — appelé DÈS le lancement, avant l'accept : stderr
          * porte les lignes de l'orchestrateur, stdout les rares messages
-         * JVM (démarrage impossible…) — les deux rejoignent le journal
-         * applicatif sous le tag dédié.
+         * JVM (démarrage impossible…), les deux rejoignent le journal
+         * applicatif sous le tag dédié, la fenêtre de connexion comprise.
          */
-        private fun brancherSurveillance(
+        private fun brancherSorties(
             process: ManagedProcess,
-            session: SessionTooling,
             portee: CoroutineScope,
-        ): Job {
+        ) {
             process
                 .stderrLines()
                 .onEach { ligne -> journal.w(TAG_PROCESSUS) { ligne } }
@@ -289,7 +307,6 @@ class DaemonManager
                 .stdoutLines()
                 .onEach { ligne -> journal.i(TAG_PROCESSUS) { ligne } }
                 .launchIn(portee)
-            return portee.launch { sonderSante(process, session) }
         }
 
         /** Nettoyage synchrone d'une tentative sans connexion établie. */
@@ -361,6 +378,18 @@ class DaemonManager
 
             /** Arguments invalides du process (ServerMain.CODE_ARGUMENTS). */
             const val CODE_ARGUMENTS_INVALIDES = 2
+
+            /**
+             * Fenêtre d'attente de la connexion de l'orchestrateur,
+             * lancement de la JVM compris : un démarrage à froid du JDK sur
+             * appareil dépasse le délai protocole de 10 s (§7.5, dimensionné
+             * pour le seul connect de l'orchestrateur — l'écoute existe
+             * déjà à son démarrage) ; le bout-en-bout JVM assumait déjà
+             * 30 s (DELAI_CONNEXION de BoutEnBoutTest). Expirée, l'accept
+             * est réveillé (ADR 0061), la tentative consommée, la relance
+             * repart sur un secret frais.
+             */
+            const val FENETRE_CONNEXION_MS: Long = 30_000L
 
             /** Attente initiale entre deux relances (1 s). */
             const val DELAI_RELANC_E_MS = 1_000L
