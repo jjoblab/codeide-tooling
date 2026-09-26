@@ -9,7 +9,7 @@ package jo.codeide.tooling.server
  * version de livraison de chaque étape (ADR 0040).
  */
 public object ServerVersion {
-    /** Version courante de l'orchestrateur (v0.33.1 : classpaths LSP
-     *  préparés et persistés — ADR 0058). */
-    public const val CURRENT: String = "0.33.1"
+    /** Version courante de l'orchestrateur (v0.34.0 : cohérence
+     * Material You + Paramètres à deux niveaux — ADR 0059). */
+    public const val CURRENT: String = "0.34.0"
 }
