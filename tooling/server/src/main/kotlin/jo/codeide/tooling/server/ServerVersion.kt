@@ -9,6 +9,7 @@ package jo.codeide.tooling.server
  * version de livraison de chaque étape (ADR 0040).
  */
 public object ServerVersion {
-    /** Version courante de l'orchestrateur (G5 : producteur de diagnostics). */
-    public const val CURRENT: String = "0.30.0"
+    /** Version courante de l'orchestrateur (étape 32 : sync à l'ouverture,
+     *  SyncStarted diffusé, notification — ADR 0057). */
+    public const val CURRENT: String = "0.33.0"
 }

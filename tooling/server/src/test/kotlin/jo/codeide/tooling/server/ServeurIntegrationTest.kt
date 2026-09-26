@@ -23,6 +23,7 @@ import jo.codeide.tooling.protocol.ProtocolJson
 import jo.codeide.tooling.protocol.ProtocolMessage
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
+import jo.codeide.tooling.protocol.SyncStarted
 import jo.codeide.tooling.protocol.TaskStarted
 import jo.codeide.tooling.protocol.TasksRequest
 import jo.codeide.tooling.protocol.TasksResult
@@ -314,9 +315,18 @@ class ServeurIntegrationTest {
                 projectDir = projet.toString(),
             ),
         )
+        // Étape 32 : le départ est annoncé PAR le serveur AVANT le résultat —
+        // symétrique du BuildStarted des builds (ADR 0057).
+        val depart = app.attendre(DELAI_BUILD, SyncStarted::class)
+        assertEquals("l annonce du départ échoit la requête (corrélation §3.2)", identifiant, depart.id)
+        assertEquals(projet.toString(), depart.projectDir)
         val resultat = app.attendre(DELAI_BUILD, SyncResult::class)
         assertEquals("écho de l'identifiant de requête (corrélation §3.2)", identifiant, resultat.id)
         assertTrue("la synchronisation devait réussir : ${resultat.failureMessage}", resultat.succeeded)
+        assertTrue(
+            "le SyncStarted doit précéder le SyncResult dans le flux (étape 32)",
+            app.indicesDe<SyncStarted>().first() < app.indicesDe<SyncResult>().first(),
+        )
     }
 
     @Test
@@ -548,6 +558,12 @@ private class AppFactice(
     fun sortiesContenant(texte: String): List<BuildOutput> =
         synchronized(verrou) {
             journal.filterIsInstance<BuildOutput>().filter { it.line.contains(texte) }
+        }
+
+    /** Indices des événements du type demandé, dans l ordre d arrivée. */
+    inline fun <reified T : ToolingEvent> indicesDe(): List<Int> =
+        synchronized(verrou) {
+            journal.withIndex().filter { it.value is T }.map { it.index }
         }
 
     /** Attend que l'orchestrateur rende sa main (code de sortie). */

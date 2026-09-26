@@ -57,6 +57,7 @@ internal object EchantillonsMessages {
             TaskFinished(ID_EVENEMENT, VERSION, buildId = "build-7", taskPath = ":app:compileKotlin", succeeded = true),
             BuildFinished(ID_EVENEMENT, VERSION, buildId = "build-7", succeeded = true, durationMs = 1_250),
             ProgressEvent(ID_EVENEMENT, VERSION, buildId = "build-7", message = "Configuration cache reuse"),
+            SyncStarted(ID_EVENEMENT, VERSION, projectDir = "/projets/demo"),
             SyncResult(ID_EVENEMENT, VERSION, projectDir = "/projets/demo", succeeded = true, durationMs = 4_200),
             PartialSyncResult(
                 ID_EVENEMENT,

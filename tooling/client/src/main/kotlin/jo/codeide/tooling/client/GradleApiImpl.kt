@@ -3,6 +3,7 @@ package jo.codeide.tooling.client
 import jo.codeide.core.domain.DiagnosticBuild
 import jo.codeide.core.domain.EtatBuild
 import jo.codeide.core.domain.EtatConnexion
+import jo.codeide.core.domain.EtatSyncTooling
 import jo.codeide.core.domain.FluxSortieBuild
 import jo.codeide.core.domain.GradleToolingRepository
 import jo.codeide.core.domain.InfoTache
@@ -33,6 +34,7 @@ import jo.codeide.tooling.protocol.ProgressEvent
 import jo.codeide.tooling.protocol.StreamKind
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
+import jo.codeide.tooling.protocol.SyncStarted
 import jo.codeide.tooling.protocol.TaskFinished
 import jo.codeide.tooling.protocol.TaskInfo
 import jo.codeide.tooling.protocol.TaskStarted
@@ -96,6 +98,9 @@ class GradleApiImpl
         private val connexion = MutableStateFlow(EtatConnexion.DECONNECTEE)
         private val tas = MutableStateFlow(InstantaneTas(0, 0))
         private val diagnosticsGlobal = MutableStateFlow<List<DiagnosticBuild>>(emptyList())
+
+        /** État de sync annoncé par l'orchestrateur (étape 32, ADR 0057). */
+        private val sync = MutableStateFlow(EtatSyncTooling())
 
         /**
          * Horodatage (epoch ms) du dernier [PongMessage] reçu — 0 si aucun.
@@ -164,6 +169,7 @@ class GradleApiImpl
                         session = null
                         romprePromesses()
                         rompreBuildsEnCours()
+                        rompreSyncEnCours()
                     }
                 }
             }
@@ -205,11 +211,52 @@ class GradleApiImpl
             courante?.fermer()
             connexion.value = EtatConnexion.DECONNECTEE
             romprePromesses()
+            rompreSyncEnCours()
             // Les canaux fermés gardaient l'historique des builds de la
             // session : elle est finie, l'empreinte s'arrête ici.
             sorties.values.forEach { canal -> runCatching { canal.close() } }
             sorties.clear()
             etats.clear()
+        }
+
+        /**
+         * Conclut une sync EN COURS à la perte de session (étape 32) :
+         * plus aucun résultat n'arrivera — l'état observé repasse au
+         * repos, l'UI ne reste pas suspendue sur un « en cours » mort.
+         */
+        private fun rompreSyncEnCours() {
+            if (sync.value.enCours) {
+                sync.value = EtatSyncTooling(enCours = false)
+            }
+        }
+
+        /**
+         * Routage des événements de synchronisation (étape 32, ADR 0057) :
+         * le départ annoncé PAR le serveur alimente l'état observable — la
+         * promesse, elle, attend toujours le résultat.
+         */
+        private fun pomperSync(evenement: ToolingEvent) {
+            when (evenement) {
+                is SyncStarted -> {
+                    sync.value = EtatSyncTooling(enCours = true, projectDir = evenement.projectDir)
+                }
+
+                is SyncResult -> {
+                    sync.value = EtatSyncTooling(enCours = false, projectDir = evenement.projectDir)
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
+                is PartialSyncResult -> {
+                    sync.value = EtatSyncTooling(enCours = false, projectDir = evenement.projectDir)
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
+                else -> {
+                    // Séparé du routage principal pour la complexité —
+                    // inatteignable : le site d'appel filtre les trois types.
+                    Unit
+                }
+            }
         }
 
         /** Routage d'un événement entrant vers ses flux et promesses. */
@@ -235,12 +282,8 @@ class GradleApiImpl
                     diagnosticsGlobal.value = listOf(evenement.versDiagnosticDomaine())
                 }
 
-                is SyncResult -> {
-                    promesses.remove(evenement.id)?.complete(evenement)
-                }
-
-                is PartialSyncResult -> {
-                    promesses.remove(evenement.id)?.complete(evenement)
+                is SyncStarted, is SyncResult, is PartialSyncResult -> {
+                    pomperSync(evenement)
                 }
 
                 is TasksResult -> {
@@ -289,6 +332,8 @@ class GradleApiImpl
         override fun observeHeap(): Flow<InstantaneTas> = tas.asStateFlow()
 
         override fun observeConnectionState(): Flow<EtatConnexion> = connexion.asStateFlow()
+
+        override fun observeSyncState(): Flow<EtatSyncTooling> = sync.asStateFlow()
 
         override fun observeDiagnostics(projectDir: File): Flow<List<DiagnosticBuild>> = diagnosticsGlobal.asStateFlow()
 

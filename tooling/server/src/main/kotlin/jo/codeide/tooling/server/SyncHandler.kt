@@ -4,6 +4,7 @@ import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
+import jo.codeide.tooling.protocol.SyncStarted
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.gradle.tooling.model.GradleProject
@@ -25,10 +26,25 @@ internal class SyncHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
 ) {
-    /** Résout les modèles du projet et publie [SyncResult] ou [PartialSyncResult]. */
+    /** Résout les modèles du projet et publie [SyncStarted] puis
+     *  [SyncResult] ou [PartialSyncResult]. */
     suspend fun synchroniser(requete: SyncRequest) {
         val debut = System.currentTimeMillis()
         val dossier = File(requete.projectDir)
+
+        // Départ annoncé AVANT toute résolution (étape 32, ADR 0057) :
+        // symétrique du BuildStarted des builds — l'app rend son état
+        // sur un événement DU serveur, pas sur la présomption de son
+        // propre geste (une sync peut aussi partir d'un autre point
+        // d'entrée demain).
+        bus.publier(
+            SyncStarted(
+                id = requete.id,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = requete.projectDir,
+            ),
+        )
+
         val resolus = mutableListOf<String>()
         val echoues = mutableListOf<String>()
 

@@ -229,6 +229,21 @@ public data class SyncRequest(
     public val gradleVersion: String? = null,
 ) : ToolingRequest
 
+/**
+ * La synchronisation a commencé (étape 32, ADR 0057) : émis AVANT la
+ * résolution des modèles — symétrique de [BuildStarted] pour les builds,
+ * l'app voit le départ venir DU serveur, pas seulement de son propre
+ * geste (l'en-tête et la notification se posent sur un fait, pas sur une
+ * présomption).
+ */
+@Serializable
+@SerialName("sync_started")
+public data class SyncStarted(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+) : ToolingEvent
+
 /** Synchronisation terminée (réussie ou échec sec). */
 @Serializable
 @SerialName("sync_result")
