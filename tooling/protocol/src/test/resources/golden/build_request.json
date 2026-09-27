@@ -1,7 +1,7 @@
 {
   "type": "build_request",
   "id": "req-42",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "projectDir": "/projets/demo",
   "tasks": [
     "build",

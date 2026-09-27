@@ -1,7 +1,7 @@
 {
   "type": "build_finished",
   "id": "evt-43",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "buildId": "build-7",
   "succeeded": true,
   "durationMs": 1250,

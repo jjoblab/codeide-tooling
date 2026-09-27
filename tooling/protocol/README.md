@@ -23,7 +23,8 @@ Gradle (client-serveur) », sections 3 et 9 (étape G1). ADR 0039.
   (`@SerialName` + `classDiscriminator = "type"`), compatibilité
   ascendante (`ignoreUnknownKeys` — un client v2.1 dialogue avec un
   serveur v2.0), `encodeDefaults` pour un format câble stable.
-- **Constantes `GradleProtocol`** (§3.4) : version 2, nom du socket,
+- **Constantes `GradleProtocol`** (§3.4) : version 3 (v0.36.0 —
+  `SyncProgress`, `TaskFinished.durationMs`/`skipped`), nom du socket,
   heartbeat 5 s / timeout 15 s, connexion 10 s, reconnexions 5, JAR
   `gradle-server.jar`, taille max de frame.
 - **Fichiers dorés** (`src/test/resources/golden/*.json`, un par
@@ -32,7 +33,7 @@ Gradle (client-serveur) », sections 3 et 9 (étape G1). ADR 0039.
 
 ## Tests (bloquants avant tooling:server/client — §3)
 
-Round-trip de sérialisation des 24 messages, décodage depuis les
+Round-trip de sérialisation des 28 messages, décodage depuis les
 fichiers dorés, adéquation de l'encodage aux dorés (comparaison
 sémantique), champ inconnu ignoré, négociation de version au handshake,
 erreurs typées ; framing : frame valide, consécutives, trop grande,

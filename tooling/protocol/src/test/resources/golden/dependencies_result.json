@@ -1,7 +1,7 @@
 {
   "type": "dependencies_result",
   "id": "evt-43",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "projectDir": "/projets/demo",
   "dependencies": [
     {

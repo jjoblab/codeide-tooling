@@ -9,8 +9,17 @@ package jo.codeide.tooling.protocol
  * se voit au handshake, pas au milieu d'un build.
  */
 public object GradleProtocol {
-    /** Version courante du protocole (négociée au handshake, §4.4/§3.2). */
-    public const val PROTOCOL_VERSION: Int = 2
+    /**
+     * Version courante du protocole (négociée au handshake, §4.4/§3.2).
+     *
+     * v3 (affichage des tâches, G5 abouti) : nouveau [SyncProgress] pendant
+     * la synchronisation (phases structurées — la sync cesse d'être une boîte
+     * noire), [TaskFinished] enrichi de `durationMs` et `skipped`. Le
+     * handshake exige l'égalité EXACTE des deux côtés : un orchestrateur v3
+     * qui parlerait à une app v2 est refusé avec un message clair au lieu
+     * d'échouer au décodage d'un événement inconnu.
+     */
+    public const val PROTOCOL_VERSION: Int = 3
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"

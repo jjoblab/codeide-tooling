@@ -173,7 +173,15 @@ public data class TaskStarted(
     public val taskPath: String,
 ) : ToolingEvent
 
-/** Une tâche du build se termine (réussie ou non). */
+/**
+ * Une tâche du build se termine (réussie, sautée ou non).
+ *
+ * v3 : `durationMs` (durée effective mesurée par l'opération Gradle,
+ * symétrique de [BuildFinished.durationMs]) et `skipped` (une tâche
+ * SAUTÉE n'est ni un échec ni un vrai travail — l'affichage s'honore à la
+ * distinguer, comme la console d'Android Studio) ; défauts compatibles
+ * avec les frames v2 (`ignoreUnknownKeys` + valeurs par défaut).
+ */
 @Serializable
 @SerialName("task_finished")
 public data class TaskFinished(
@@ -182,6 +190,8 @@ public data class TaskFinished(
     public val buildId: String,
     public val taskPath: String,
     public val succeeded: Boolean,
+    public val durationMs: Long = 0,
+    public val skipped: Boolean = false,
 ) : ToolingEvent
 
 /** Résultat final d'un build. */
@@ -269,6 +279,47 @@ public data class PartialSyncResult(
     public val resolvedModels: List<String>,
     public val failedModels: List<String>,
 ) : ToolingEvent
+
+/**
+ * Phase d'une synchronisation (v3) : étape intermédiaire structurée entre
+ * [SyncStarted] et [SyncResult]/[PartialSyncResult] — la sync cesse d'être
+ * une boîte noire « en cours / terminée », l'app affiche CE que
+ * l'orchestrateur fait (connexion au daemon Gradle, résolution de chaque
+ * modèle) comme la console d'Android Studio déroule ses phases.
+ *
+ * Une phase est annoncée DEUX fois : au départ ([terminee] `false`) et à
+ * la fin ([terminee] `true`, [dureeMs] de la phase) — le client en fait des
+ * lignes de console du canal Sync. Les libellés restent côté client
+ * (l'état voyage structuré, jamais localisé par le serveur).
+ */
+@Serializable
+@SerialName("sync_progress")
+public data class SyncProgress(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val phase: SyncPhase,
+    public val terminee: Boolean = false,
+    public val dureeMs: Long = 0,
+) : ToolingEvent
+
+/**
+ * Phase énumérée d'une synchronisation (v3) — miroir câble de l'étape
+ * domaine, l'UI choisit ses libellés.
+ */
+@Serializable
+public enum class SyncPhase {
+    /** Ouverture de la connexion Tooling API (première fois : lancement du
+     *  daemon Gradle, téléchargement de la distribution — la phase la plus
+     *  longue d'une première sync). */
+    CONNEXION,
+
+    /** Résolution du modèle `GradleProject` (tâches du projet). */
+    MODELE_GRADLE,
+
+    /** Résolution du modèle `IdeaProject` (structure IDE, dépendances). */
+    MODELE_IDEA,
+}
 
 /** Liste les tâches d'un projet (sélecteur « Exécuter »). */
 @Serializable

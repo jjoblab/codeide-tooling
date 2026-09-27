@@ -26,6 +26,9 @@ import java.util.concurrent.CopyOnWriteArrayList
  * de tâches, réussite/saut/échec — les autres évènements sont ignorés sans
  * erreur (le pont n'est enregistré que pour `OperationType.TASK`, mais il
  * doit rester silencieux sur tout ce qui arrive quand même).
+ *
+ * v3 : la fin d'une tâche porte la durée MESURÉE (endTime − startTime) et
+ * la marque sautée — assertées ici avec des résultats instrumentés.
  */
 class ProgressBridgeTest {
     private class BusCollecteur : EventBus {
@@ -97,11 +100,11 @@ class ProgressBridgeTest {
         override fun getResult(): OperationResult = resultat
     }
 
-    /** Résultat de réussite (aucune méthode propre). */
+    /** Résultat de réussite (aucune méthode propre) — 2 345 ms d'exécution. */
     private object Reussite : SuccessResult {
-        override fun getStartTime(): Long = 0L
+        override fun getStartTime(): Long = 10_000L
 
-        override fun getEndTime(): Long = 1L
+        override fun getEndTime(): Long = 12_345L
     }
 
     /** Résultat sauté (aucune méthode propre). */
@@ -144,7 +147,7 @@ class ProgressBridgeTest {
     }
 
     @Test
-    fun `la fin réussie d'une tâche publie TaskFinished réussi`() {
+    fun `la fin réussie d'une tâche publie TaskFinished réussi et mesuré`() {
         val bus = BusCollecteur()
         pont(bus).statusChanged(
             FinTache(DescripteurTache(":app:saluer"), Reussite),
@@ -152,24 +155,30 @@ class ProgressBridgeTest {
         val evenement = bus.evenements.single() as TaskFinished
         assertEquals(":app:saluer", evenement.taskPath)
         assertEquals(true, evenement.succeeded)
+        assertEquals(2_345L, evenement.durationMs)
+        assertEquals(false, evenement.skipped)
     }
 
     @Test
-    fun `une tâche sautée est une fin réussie`() {
+    fun `une tâche sautée est une fin réussie marquée sautée`() {
         val bus = BusCollecteur()
         pont(bus).statusChanged(
             FinTache(DescripteurTache(":app:tests"), Saute),
         )
-        assertEquals(true, (bus.evenements.single() as TaskFinished).succeeded)
+        val evenement = bus.evenements.single() as TaskFinished
+        assertEquals(true, evenement.succeeded)
+        assertEquals(true, evenement.skipped)
     }
 
     @Test
-    fun `l'échec d'une tâche publie TaskFinished en échec`() {
+    fun `l'échec d'une tâche publie TaskFinished en échec non sauté`() {
         val bus = BusCollecteur()
         pont(bus).statusChanged(
             FinTache(DescripteurTache(":app:compileJava"), EchecResultat(listOf(Echec("';' attendu")))),
         )
-        assertEquals(false, (bus.evenements.single() as TaskFinished).succeeded)
+        val evenement = bus.evenements.single() as TaskFinished
+        assertEquals(false, evenement.succeeded)
+        assertEquals(false, evenement.skipped)
     }
 
     @Test

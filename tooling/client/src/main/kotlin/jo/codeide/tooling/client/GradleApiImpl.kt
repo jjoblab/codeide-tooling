@@ -3,9 +3,12 @@ package jo.codeide.tooling.client
 import jo.codeide.core.domain.ClasspathProjet
 import jo.codeide.core.domain.DiagnosticBuild
 import jo.codeide.core.domain.EntreeClasspath
+import jo.codeide.core.domain.EtapeSync
+import jo.codeide.core.domain.EtapeSyncTooling
 import jo.codeide.core.domain.EtatBuild
 import jo.codeide.core.domain.EtatConnexion
 import jo.codeide.core.domain.EtatSyncTooling
+import jo.codeide.core.domain.EtatTacheBuild
 import jo.codeide.core.domain.FluxSortieBuild
 import jo.codeide.core.domain.GradleToolingRepository
 import jo.codeide.core.domain.InfoTache
@@ -15,6 +18,7 @@ import jo.codeide.core.domain.ModuleClasspath
 import jo.codeide.core.domain.ResultatSynchronisation
 import jo.codeide.core.domain.SeveriteDiagnostic
 import jo.codeide.core.domain.StatutBuild
+import jo.codeide.core.domain.StatutTache
 import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
@@ -40,6 +44,7 @@ import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.PongMessage
 import jo.codeide.tooling.protocol.ProgressEvent
 import jo.codeide.tooling.protocol.StreamKind
+import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
 import jo.codeide.tooling.protocol.SyncStarted
@@ -134,6 +139,22 @@ class GradleApiImpl
         /** Sorties par build — canal borné, envoi suspendant (§5.2). */
         private val sorties = ConcurrentHashMap<String, Channel<LigneSortieBuild>>()
 
+        /**
+         * Tâches par build — canal borné, envoi suspendant (v3) : mêmes
+         * garanties que la sortie (jamais conflaté, tamponné AVANT le
+         * lancement, rejouable par un collecteur tardif jusqu'à la fin du
+         * build).
+         */
+        private val tachesParBuild = ConcurrentHashMap<String, Channel<EtatTacheBuild>>()
+
+        /**
+         * Étapes de sync — canal borné, envoi suspendant (v3) : l'ordre
+         * départ/fin de chaque phase est l'information, la conflation
+         * mentirait. Unique pour le process : les syncs se succèdent, ne se
+         * chevauchent pas (une seule session orchestrateur).
+         */
+        private val progressionSync = Channel<EtapeSyncTooling>(TAILLE_TAMPON_SYNC)
+
         /** États par build — conflation légitime (état courant). */
         private val etats = ConcurrentHashMap<String, MutableStateFlow<EtatBuild>>()
 
@@ -224,6 +245,8 @@ class GradleApiImpl
             // session : elle est finie, l'empreinte s'arrête ici.
             sorties.values.forEach { canal -> runCatching { canal.close() } }
             sorties.clear()
+            tachesParBuild.values.forEach { canal -> runCatching { canal.close() } }
+            tachesParBuild.clear()
             etats.clear()
         }
 
@@ -267,7 +290,64 @@ class GradleApiImpl
             }
         }
 
-        /** Routage d'un événement entrant vers ses flux et promesses. */
+        /**
+         * Une étape de sync traverse (v3) : elle part dans le canal des
+         * étapes — l'état `enCours` reste porté par [sync] (conflation
+         * légitime d'un ÉTAT), les ÉTAPES ne se mélangent jamais.
+         */
+        private suspend fun pomperEtapeSync(evenement: SyncProgress) {
+            progressionSync.send(
+                EtapeSyncTooling(
+                    projectDir = evenement.projectDir,
+                    etape = EtapeSync.valueOf(evenement.phase.name),
+                    terminee = evenement.terminee,
+                    dureeMs = evenement.dureeMs,
+                ),
+            )
+        }
+
+        /** Une tâche démarre (v3) : elle part dans le canal du build. */
+        private suspend fun pomperTacheDemarree(evenement: TaskStarted) {
+            tachesParBuild[evenement.buildId]?.send(
+                EtatTacheBuild(
+                    buildId = evenement.buildId,
+                    chemin = evenement.taskPath,
+                    statut = StatutTache.EN_COURS,
+                ),
+            )
+        }
+
+        /**
+         * Une tâche se termine (v3) : statut traduit (sautée ≠ réussie ≠
+         * échouée — la console les distingue) et durée MESURÉE du côté du
+         * serveur, la même source de vérité que [BuildFinished.durationMs].
+         */
+        private suspend fun pomperTacheTerminee(evenement: TaskFinished) {
+            tachesParBuild[evenement.buildId]?.send(
+                EtatTacheBuild(
+                    buildId = evenement.buildId,
+                    chemin = evenement.taskPath,
+                    statut =
+                        when {
+                            evenement.skipped -> StatutTache.SAUTEE
+                            evenement.succeeded -> StatutTache.REUSSIE
+                            else -> StatutTache.ECHOUEE
+                        },
+                    dureeMs = evenement.durationMs,
+                ),
+            )
+        }
+
+        /**
+         * Routage d'un événement entrant vers ses flux et promesses.
+         *
+         * Exemption detekt ciblée (règle 16) : CyclomaticComplexMethod —
+         * une branche par TYPE d'événement du protocole (le contrat complet
+         * de l'orchestrateur, v3 comprise : tâches au fil du build, étapes
+         * de sync), chacune déléguée d'une ligne : un aiguillage plat, pas
+         * de la logique imbriquée — l'éclater déplacerait le problème.
+         */
+        @Suppress("CyclomaticComplexMethod")
         private suspend fun pomper(evenement: ToolingEvent) {
             when (evenement) {
                 is BuildOutput -> {
@@ -292,6 +372,10 @@ class GradleApiImpl
 
                 is SyncStarted, is SyncResult, is PartialSyncResult -> {
                     pomperSync(evenement)
+                }
+
+                is SyncProgress -> {
+                    pomperEtapeSync(evenement)
                 }
 
                 is TasksResult -> {
@@ -324,10 +408,24 @@ class GradleApiImpl
 
                 // réponse de handshake déjà consommée
 
-                // Événements de granularité tâche et progression générique :
-                // l'état exposé est celui du BUILD (§5.3) — G5 affine s'il
-                // expose les tâches à l'UI.
-                is TaskStarted, is TaskFinished, is ProgressEvent -> {
+                // v3 — le trou est réparé : les événements de granularité
+                // tâche alimentent [observeTachesBuild] (une ligne par tâche
+                // dans la console, mise à jour en place à sa fin — comme la
+                // vue Build d'Android Studio) ; l'état du BUILD reste celui
+                // de [observeBuildState], les deux ne se mélangent pas.
+                is TaskStarted -> {
+                    pomperTacheDemarree(evenement)
+                }
+
+                is TaskFinished -> {
+                    pomperTacheTerminee(evenement)
+                }
+
+                // Progression générique : toujours PERSONNE ne l'émet à ce
+                // jour (réservée aux types d'opérations que G5 jugera
+                // utiles — la progression de sync voyage par SyncProgress,
+                // structurée, depuis la v3).
+                is ProgressEvent -> {
                     Unit
                 }
             }
@@ -339,6 +437,8 @@ class GradleApiImpl
 
         override fun observeBuildOutput(buildId: String): Flow<LigneSortieBuild> = sortie(buildId).receiveAsFlow()
 
+        override fun observeTachesBuild(buildId: String): Flow<EtatTacheBuild> = taches(buildId).receiveAsFlow()
+
         override fun observeBuildState(buildId: String): Flow<EtatBuild> = etat(buildId).asStateFlow()
 
         override fun observeHeap(): Flow<InstantaneTas> = tas.asStateFlow()
@@ -346,6 +446,8 @@ class GradleApiImpl
         override fun observeConnectionState(): Flow<EtatConnexion> = connexion.asStateFlow()
 
         override fun observeSyncState(): Flow<EtatSyncTooling> = sync.asStateFlow()
+
+        override fun observeSyncProgress(): Flow<EtapeSyncTooling> = progressionSync.receiveAsFlow()
 
         override fun observeDiagnostics(projectDir: File): Flow<List<DiagnosticBuild>> = diagnosticsGlobal.asStateFlow()
 
@@ -460,13 +562,16 @@ class GradleApiImpl
         override suspend fun build(
             projectDir: File,
             tasks: List<String>,
+            arguments: List<String>,
         ): String {
             val buildId = nouvelIdentifiant()
             // Canal et état créés AVANT l'envoi : les événements qui arrivent
-            // PENDANT le lancement (l'orchestrateur émet dès BuildStarted) se
-            // tamponnent au lieu d'être perdus — la souscription après le
-            // lancement ne manque rien (§5.2).
+            // PENDANT le lancement (l'orchestrateur émet dès BuildStarted)
+            // se tamponnent au lieu d'être perdus — la souscription après le
+            // lancement ne manque rien (§5.2). Même tamponnement pour les
+            // TÂCHES (v3) : les TaskStarted précoces attendent le collecteur.
             sortie(buildId)
+            taches(buildId)
             etat(buildId).value = EtatBuild(buildId = buildId, statut = StatutBuild.EN_COURS)
             val sessionCourante = session
             if (sessionCourante == null) {
@@ -487,6 +592,7 @@ class GradleApiImpl
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = projectDir.canonicalPath,
                         tasks = tasks,
+                        arguments = arguments,
                         buildId = buildId,
                     ),
                 )
@@ -602,11 +708,16 @@ class GradleApiImpl
                             messageEchec = "connexion avec l'orchestrateur perdue",
                         )
                     sorties[buildId]?.close()
+                    tachesParBuild[buildId]?.close()
                 }
         }
 
         private fun sortie(buildId: String): Channel<LigneSortieBuild> =
             sorties.computeIfAbsent(buildId) { Channel(TAILLE_TAMPON_SORTIE) }
+
+        /** Canal des tâches du build (v3) — borné, envoi suspendant. */
+        private fun taches(buildId: String): Channel<EtatTacheBuild> =
+            tachesParBuild.computeIfAbsent(buildId) { Channel(TAILLE_TAMPON_SORTIE) }
 
         private fun etat(buildId: String): MutableStateFlow<EtatBuild> =
             etats.computeIfAbsent(buildId) {
@@ -632,11 +743,11 @@ class GradleApiImpl
         }
 
         /**
-         * Le build se termine : état final, puis le canal se FERME sans être
-         * retiré — un collecteur tardif (onglet Sortie ouvert après le build,
-         * rotation) draine le tampon puis complète : aucune perte, et
-         * ré-observer un build terminé rejoue son historique. La mémoire est
-         * bornée par la durée de la SESSION : [fermerSession] nettoie tout.
+         * Le build se termine : état final, puis les canaux se FERMENT sans
+         * être retirés — un collecteur vivant draine ce qui reste puis
+         * complète : aucune perte, aucun collecteur laissé en suspens. La
+         * mémoire est bornée par la durée de la SESSION :
+         * [fermerSession] nettoie tout.
          */
         private fun pomperFin(evenement: BuildFinished) {
             etat(evenement.buildId).value =
@@ -647,6 +758,7 @@ class GradleApiImpl
                     messageEchec = evenement.failureMessage,
                 )
             sorties[evenement.buildId]?.close()
+            tachesParBuild[evenement.buildId]?.close()
         }
 
         private fun nouvelIdentifiant(): String = UUID.randomUUID().toString()
@@ -722,6 +834,14 @@ class GradleApiImpl
              * jamais conflaté, jamais perdant).
              */
             const val TAILLE_TAMPON_SORTIE = 4096
+
+            /**
+             * Tampon des étapes de sync (v3) : une sync annonce six
+             * étapes au plus (départ + fin par phase) — 256 couvre des
+             * dizaines de sync non collectées, et l'envoi suspendant
+             * borne la mémoire avant ça (contre-pression, jamais perdu).
+             */
+            const val TAILLE_TAMPON_SYNC = 256
 
             /** Délais client des requêtes-réponses (§7.5). */
             const val DELAI_SYNC_MS: Long = 5 * 60_000L

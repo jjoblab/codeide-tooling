@@ -1,9 +1,13 @@
 package jo.codeide.tooling.client
 
+import jo.codeide.core.domain.EtapeSync
+import jo.codeide.core.domain.EtapeSyncTooling
 import jo.codeide.core.domain.EtatConnexion
+import jo.codeide.core.domain.EtatTacheBuild
 import jo.codeide.core.domain.FluxSortieBuild
 import jo.codeide.core.domain.LigneSortieBuild
 import jo.codeide.core.domain.StatutBuild
+import jo.codeide.core.domain.StatutTache
 import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
@@ -24,8 +28,12 @@ import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.HeapEvent
 import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.StreamKind
+import jo.codeide.tooling.protocol.SyncPhase
+import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
+import jo.codeide.tooling.protocol.TaskFinished
 import jo.codeide.tooling.protocol.TaskInfo
+import jo.codeide.tooling.protocol.TaskStarted
 import jo.codeide.tooling.protocol.TasksRequest
 import jo.codeide.tooling.protocol.TasksResult
 import kotlinx.coroutines.async
@@ -408,6 +416,122 @@ class GradleApiImplTest {
             val etat = api.observeBuildState(buildId).first { it.statut != StatutBuild.EN_COURS }
             assertEquals(StatutBuild.ECHOUE, etat.statut)
             assertEquals("échec simulé", etat.messageEchec)
+        }
+
+    // ------------------------------------------------------------------
+    // v3 — affichage des tâches : le trou de GradleApiImpl est réparé.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `les taches du build traversent vers observeTachesBuild puis le canal se ferme`() =
+        runBlocking {
+            val session =
+                SessionFactice { requete, soi ->
+                    if (requete is BuildRequest) {
+                        soi.emettre(BuildStarted(nouvelId(), protocole, requete.buildId, listOf("saluer")))
+                        soi.emettre(TaskStarted(nouvelId(), protocole, requete.buildId, ":app:compileKotlin"))
+                        soi.emettre(TaskStarted(nouvelId(), protocole, requete.buildId, ":app:test"))
+                        soi.emettre(
+                            TaskFinished(
+                                nouvelId(),
+                                protocole,
+                                requete.buildId,
+                                ":app:compileKotlin",
+                                succeeded = true,
+                                durationMs = 2_345,
+                            ),
+                        )
+                        soi.emettre(
+                            TaskFinished(
+                                nouvelId(),
+                                protocole,
+                                requete.buildId,
+                                ":app:test",
+                                succeeded = true,
+                                skipped = true,
+                            ),
+                        )
+                        soi.emettre(BuildFinished(nouvelId(), protocole, requete.buildId, true, 5_000))
+                    }
+                }
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+            val buildId = api.build(File("/p"), listOf("saluer"))
+
+            // Les quatre événements de tâche traversent, dans l'ordre, avec
+            // leurs statuts traduits (sautée ≠ réussie) et la durée MESURÉE.
+            val taches = mutableListOf<EtatTacheBuild>()
+            withTimeout(5_000) {
+                api.observeTachesBuild(buildId).take(4).toList(taches)
+            }
+            assertEquals(
+                listOf(StatutTache.EN_COURS, StatutTache.EN_COURS, StatutTache.REUSSIE, StatutTache.SAUTEE),
+                taches.map { it.statut },
+            )
+            assertEquals(
+                listOf(":app:compileKotlin", ":app:test", ":app:compileKotlin", ":app:test"),
+                taches.map { it.chemin },
+            )
+            assertEquals(2_345L, taches[2].dureeMs)
+
+            // À la fin du build, le canal se FERME : un NOUVEAU collecteur
+            // complète immédiatement au lieu de pendre à jamais (fan-out :
+            // les événements déjà consommés ne se rejouent pas — même
+            // sémantique que la sortie, le tamponage AVANT abonnement est
+            // prouvé par la première collecte, postérieure au lancement).
+            val tardives = mutableListOf<EtatTacheBuild>()
+            withTimeout(5_000) {
+                api.observeTachesBuild(buildId).toList(tardives)
+            }
+            assertTrue("le canal fermé ne laisse aucun collecteur en suspens", tardives.isEmpty())
+        }
+
+    @Test
+    fun `les etapes de sync annoncent leur depart et leur duree - jamais conflates`() =
+        runBlocking {
+            val session = SessionFactice()
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+
+            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.CONNEXION))
+            session.emettre(
+                SyncProgress(nouvelId(), protocole, "/p", SyncPhase.CONNEXION, terminee = true, dureeMs = 1_500),
+            )
+            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.MODELE_GRADLE))
+
+            val etapes = mutableListOf<EtapeSyncTooling>()
+            withTimeout(5_000) {
+                api.observeSyncProgress().take(3).toList(etapes)
+            }
+            assertEquals(
+                listOf(EtapeSync.CONNEXION, EtapeSync.CONNEXION, EtapeSync.MODELE_GRADLE),
+                etapes.map { it.etape },
+            )
+            assertEquals(
+                "départ puis fin : les deux annonces traversent",
+                listOf(false, true, false),
+                etapes.map { it.terminee },
+            )
+            assertEquals(1_500L, etapes[1].dureeMs)
+            assertEquals("le dossier annoncé voyage", "/p", etapes[0].projectDir)
+        }
+
+    @Test
+    fun `les arguments du build voyagent avec la requete - v3`() =
+        runBlocking {
+            val session = SessionFactice()
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+
+            api.build(File("/p"), listOf("saluer"), listOf("--offline", "--stacktrace"))
+
+            val requete = session.messages.filterIsInstance<BuildRequest>().single()
+            assertEquals(listOf("saluer"), requete.tasks)
+            assertEquals(
+                "les réglages tooling (hors ligne, arguments libres) traversent jusqu'à l'orchestrateur",
+                listOf("--offline", "--stacktrace"),
+                requete.arguments,
+            )
         }
 
     /** Attente déterministe (les effets asynchrones se pollent borné). */

@@ -1,0 +1,9 @@
+{
+  "type": "sync_progress",
+  "id": "evt-43",
+  "protocolVersion": 3,
+  "projectDir": "/projets/demo",
+  "phase": "MODELE_IDEA",
+  "terminee": true,
+  "dureeMs": 1800
+}

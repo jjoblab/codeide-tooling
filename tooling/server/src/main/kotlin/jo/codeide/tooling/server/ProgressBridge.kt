@@ -20,6 +20,12 @@ import org.gradle.tooling.events.task.TaskProgressEvent
  * (`ProgressEvent` du protocole) est réservée aux types d'opérations que
  * G5 jugera utiles d'ajouter.
  *
+ * v3 (affichage des tâches) : [TaskFinished] porte la durée MESURÉE par
+ * l'opération Gradle (`endTime - startTime`, même source de vérité que
+ * [BuildFinished.durationMs]) et la distinction sautée/réellement
+ * exécutée — la console affiche « :app:xxx (2,3 s) » et « :app:yyy SAUTÉE »
+ * comme celle d'Android Studio, sans horloge client approximative.
+ *
  * Appelé depuis les fils internes de Gradle : [EventBus.publier] est
  * bloquant borné, jamais perdant — fil de pompage bloqué = contrôle de flux.
  *
@@ -58,6 +64,8 @@ internal class ProgressBridge(
                         buildId = buildId,
                         taskPath = chemin,
                         succeeded = resultat.reussi(),
+                        durationMs = maxOf(0L, resultat.endTime - resultat.startTime),
+                        skipped = resultat is SkippedResult,
                     ),
                 )
             }

@@ -1,6 +1,6 @@
 {
   "type": "sync_started",
   "id": "evt-43",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "projectDir": "/projets/demo"
 }

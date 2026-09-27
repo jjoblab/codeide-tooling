@@ -24,9 +24,12 @@ import jo.codeide.tooling.protocol.PingMessage
 import jo.codeide.tooling.protocol.PongMessage
 import jo.codeide.tooling.protocol.ProtocolJson
 import jo.codeide.tooling.protocol.ProtocolMessage
+import jo.codeide.tooling.protocol.SyncPhase
+import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
 import jo.codeide.tooling.protocol.SyncStarted
+import jo.codeide.tooling.protocol.TaskFinished
 import jo.codeide.tooling.protocol.TaskStarted
 import jo.codeide.tooling.protocol.TasksRequest
 import jo.codeide.tooling.protocol.TasksResult
@@ -174,6 +177,19 @@ class ServeurIntegrationTest {
         assertTrue(
             "la sortie devait contenir le salut de la fixture",
             app.sortiesContenant("Bonjour depuis minimal-java").isNotEmpty(),
+        )
+        // v3 (affichage des tâches) : chaque tâche traverse le protocole —
+        // démarrage puis fin MESURÉE, la tâche saluer comprise.
+        val demarrages = app.evenementsDe<TaskStarted>().filter { it.buildId == "b-minimal" }
+        assertTrue("au moins une tâche devait démarrer", demarrages.isNotEmpty())
+        demarrages.forEach { demarrage ->
+            val finTache = app.evenementsDe<TaskFinished>().first { it.taskPath == demarrage.taskPath }
+            assertEquals("b-minimal", finTache.buildId)
+            assertTrue("la fin de ${demarrage.taskPath} devait suivre son départ", finTache.succeeded)
+        }
+        assertTrue(
+            "la tâche saluer devait être annoncée avec son chemin",
+            demarrages.any { it.taskPath.endsWith(":saluer") },
         )
     }
 
@@ -329,6 +345,25 @@ class ServeurIntegrationTest {
         assertTrue(
             "le SyncStarted doit précéder le SyncResult dans le flux (étape 32)",
             app.indicesDe<SyncStarted>().first() < app.indicesDe<SyncResult>().first(),
+        )
+        // v3 : les phases de sync sont annoncées ENTRE le départ et le
+        // résultat — chaque phase au départ PUIS à la fin avec sa durée :
+        // la sync cesse d'être une boîte noire « en cours / terminée ».
+        val progressions = app.evenementsDe<SyncProgress>()
+        assertTrue("la sync devait annoncer ses phases (v3)", progressions.isNotEmpty())
+        SyncPhase.entries.forEach { phase ->
+            assertTrue(
+                "la phase $phase devait être annoncée au départ",
+                progressions.any { it.phase == phase && !it.terminee },
+            )
+            assertTrue(
+                "la phase $phase devait être conclue avec une durée",
+                progressions.any { it.phase == phase && it.terminee && it.dureeMs >= 0 },
+            )
+        }
+        assertTrue(
+            "les phases doivent précéder le SyncResult",
+            app.indicesDe<SyncProgress>().last() < app.indicesDe<SyncResult>().first(),
         )
     }
 
@@ -600,6 +635,12 @@ private class AppFactice(
     fun sortiesContenant(texte: String): List<BuildOutput> =
         synchronized(verrou) {
             journal.filterIsInstance<BuildOutput>().filter { it.line.contains(texte) }
+        }
+
+    /** Événements du type demandé, dans l ordre d arrivée. */
+    inline fun <reified T : ToolingEvent> evenementsDe(): List<T> =
+        synchronized(verrou) {
+            journal.filterIsInstance<T>()
         }
 
     /** Indices des événements du type demandé, dans l ordre d arrivée. */

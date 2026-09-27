@@ -1,7 +1,7 @@
 {
   "type": "heap_event",
   "id": "evt-43",
-  "protocolVersion": 2,
+  "protocolVersion": 3,
   "usedMb": 128,
   "maxMb": 512
 }

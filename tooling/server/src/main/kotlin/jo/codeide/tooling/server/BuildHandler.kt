@@ -28,6 +28,13 @@ import kotlin.coroutines.resumeWithException
  * La sortie standard/erreur est diffusée ligne à ligne
  * ([StreamingOutputStream]), les tâches démarrent/finissent en événements
  * ([ProgressBridge]) — le tout sur l'[EventBus], jamais conflaté.
+ *
+ * v3 : la sortie est forcée en mode TEXTE (`--console=plain`, appendu en
+ * DERNIER — l'occurrence finale d'une option Gradle gagne) : sans TTY,
+ * Gradle le détecte généralement seul, mais un daemon réutilisé qui
+ * garderait un réglage riche empoisonnerait la console avec des codes ANSI
+ * — explicite plutôt qu'implicite, et valable pour TOUT client du
+ * protocole, présent ou futur.
  */
 internal class BuildHandler(
     private val pool: GradleConnectorPool,
@@ -73,7 +80,10 @@ internal class BuildHandler(
                             // (aucune surcharge Iterable<String>), l'éclatement
                             // de la liste est l'unique option.
                             .forTasks(*requete.tasks.toTypedArray())
-                            .withArguments(requete.arguments)
+                            // --console=plain TOUJOURS en fin de liste : la
+                            // dernière occurrence gagne chez Gradle — un client
+                            // qui passerait son propre --console resterait maître.
+                            .withArguments(requete.arguments + CONSOLE_TEXTE)
                             .setStandardOutput(
                                 StreamingOutputStream(requete.buildId, StreamKind.STDOUT, bus),
                             ).setStandardError(
@@ -192,5 +202,8 @@ internal class BuildHandler(
     private companion object {
         /** Bornage du rabotage des causes (§3.2 : message humain, concis). */
         const val PROFONDEUR_CAUSES = 4
+
+        /** Sortie Gradle en texte brut, sans décorations riches (v3). */
+        const val CONSOLE_TEXTE = "--console=plain"
     }
 }
