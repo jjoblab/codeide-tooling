@@ -9,8 +9,9 @@ package jo.codeide.tooling.server
  * version de livraison de chaque étape (ADR 0040).
  */
 public object ServerVersion {
-    /** Version courante de l'orchestrateur (v0.35.3 : tolérance au
-     * démontage du tuyau + garde-fou anti-plantage de la supervision —
-     * ADR 0063). */
-    public const val CURRENT: String = "0.35.3"
+    /** Version courante de l'orchestrateur (v0.35.4 : conteneur vertical
+     * unique dans les cartes des sections des Paramètres — ADR 0064 ;
+     * v0.35.3 : tolérance au démontage du tuyau + garde-fou de
+     * supervision — ADR 0063). */
+    public const val CURRENT: String = "0.35.4"
 }
