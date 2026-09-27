@@ -355,6 +355,32 @@ class DaemonManagerTest {
             assertEquals(1, lanceur.lancements.size)
         }
 
+    @Test
+    fun `un echec non prevu du lecteur de sorties est journalise sans tuer la session`() =
+        runBlocking {
+            // Régression ADR 0063 (journal de terrain v0.35.2) : le lecteur
+            // du stderr qui lève pendant l'arrêt forcé plantait l'app
+            // ENTIÈRE (exception non interceptée du collecteur) — le
+            // garde-fou du daemon journalise désormais l'échec et la
+            // connexion SURVIT.
+            val explosif = ProcessusExplosif()
+            lanceur.fabrique = { explosif }
+            hote.sessions.addAll(listOf(SessionFacticeDaemon(pongAuto = true)))
+            nouveauDaemon().demarrerEnTest()
+
+            attendreQue { api.etatConnexion == EtatConnexion.CONNECTEE }
+            explosif.declencher()
+
+            // L'échec est JOURNALISÉ (visible dans le rapport d'erreur de
+            // l'opérateur), pas propagé au gestionnaire de plantage.
+            attendreQue {
+                journal.entries.any { it.message.contains("non prévu") }
+            }
+            // La session et le health check SURVIVENT au lecteur mort.
+            Thread.sleep(300)
+            assertEquals(EtatConnexion.CONNECTEE, api.etatConnexion)
+        }
+
     // ------------------------------------------------------------------
     // Aides.
     // ------------------------------------------------------------------
@@ -485,6 +511,38 @@ private class ProcessusMaitrise(
 
     private companion object {
         const val CODE_TUE = 137
+    }
+}
+
+/**
+ * Process dont le flux stderr EXPLOSE sur commande — réplique contrôlée du
+ * mécanisme de terrain v0.35.2 (`InterruptedIOException` du lecteur à la
+ * fermeture du tuyau par un autre fil) : le garde-fou du daemon doit le
+ * journaliser sans laisser l'échec quitter la coroutine du collecteur.
+ */
+private class ProcessusExplosif : ManagedProcess {
+    private val declencheur = CompletableDeferred<Unit>()
+
+    override val pid: Int = 42_425
+
+    override fun isAlive(): Boolean = true
+
+    override fun stdoutLines(): Flow<String> = emptyList<String>().asFlow()
+
+    override fun stderrLines(): Flow<String> =
+        kotlinx.coroutines.flow.flow {
+            emit("ligne avant la fermeture")
+            declencheur.await()
+            throw java.io.InterruptedIOException("read interrupted by close() on another thread")
+        }
+
+    override suspend fun awaitExit(): Int = CompletableDeferred<Int>().await()
+
+    override fun kill(force: Boolean) = Unit
+
+    /** Fait exploser le prochain read du lecteur stderr. */
+    fun declencher() {
+        declencheur.complete(Unit)
     }
 }
 

@@ -11,6 +11,7 @@ import jo.codeide.tooling.client.SessionTooling
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.PingMessage
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -81,6 +82,25 @@ class DaemonManager
         private var arretDemande = false
 
         /**
+         * Garde-fou anti-plantage (ADR 0063) : un échec NON PRÉVU d'une
+         * coroutine de supervision (lectures du stderr/stdout du process,
+         * health check, boucle de vie) est JOURNALISÉ, jamais propagé au
+         * gestionnaire de non-interception d'Android — un plantage de
+         * l'app pour un diagnostic de tuyau est inacceptable (journal de
+         * terrain v0.35.2 : `InterruptedIOException` du lecteur 56 ms
+         * après l'arrêt forcé). Le [SupervisorJob] isole les annulations,
+         * PAS les exceptions non interceptées : sans ce gestionnaire
+         * elles tuaient le processus.
+         */
+        private val gardeImprevu =
+            CoroutineExceptionHandler { _, echec ->
+                journal.e(TAG) {
+                    "surveillance interrompue par un échec non prévu " +
+                        "(${echec::class.simpleName}) : ${echec.message}"
+                }
+            }
+
+        /**
          * Démarre (ou redémarre après [arreter]) le daemon — idempotent
          * tant qu'une surveillance tourne.
          *
@@ -92,7 +112,7 @@ class DaemonManager
             if (surveillance?.isActive == true) return
             arretDemande = false
             surveillance =
-                portee.launch(dispatchers.default) {
+                portee.launch(dispatchers.default + gardeImprevu) {
                     boucleDeVie()
                 }
         }
@@ -223,7 +243,7 @@ class DaemonManager
                 )
             journal.d(TAG) { "orchestrateur lancé (pid ${process.pid}) sur ${hote.cheminSocket}" }
 
-            val porteeTentative = CoroutineScope(SupervisorJob() + dispatchers.default)
+            val porteeTentative = CoroutineScope(SupervisorJob() + dispatchers.default + gardeImprevu)
             // Sorties branchées AVANT l'accept : l'orchestrateur qui meurt
             // ou échoue avant de se connecter s'explique LUI-MÊME sur stderr
             // (règle 14, ADR 0040) — journalisées sous le tag dédié dès leur
