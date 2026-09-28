@@ -52,12 +52,34 @@ FIN
 # Préparation de l'entrée de CHANGELOG.md.
 # ---------------------------------------------------------------------------
 date_du_jour=$(date +%F)
+# NB : le marqueur contient des crochets — dans un motif sed ils forment une
+# expression de classe de caractères, et « ## [Non publié] » littéral ne
+# matchait JAMAIS (le marqueur restait en place, l'entrée n'était jamais
+# datée : contournement manuel à chaque livraison jusqu'à v0.37.1). Les
+# crochets du MOTIF sont donc échappés ; côté REMPLACEMENT ils sont littéraux.
+# Autre défaut corrigé en même temps : l'entrée était AJOUTÉE EN FIN de
+# fichier, donc à la position la plus ANCIENNE d'un journal
+# antéchronologique — elle est désormais insérée avant la première version
+# existante (la plus récente).
 marqueur="## [Non publié]"
 if [ -f CHANGELOG.md ] && ! grep -q "^## \[$nouvelle_version\]" CHANGELOG.md; then
-    if ! grep -qF "$marqueur" CHANGELOG.md; then
-        printf '\n%s\n\n### Ajouté\n\n- (à compléter)\n' "$marqueur" >> CHANGELOG.md
+    if grep -qF "$marqueur" CHANGELOG.md; then
+        # Marqueur [Non publié] déjà ouvert : le dater en place.
+        sed -i "s|^## \[Non publié\]|## [$nouvelle_version] – $date_du_jour|" CHANGELOG.md
+    elif grep -q "^## \[" CHANGELOG.md; then
+        # Journal existant (antéchronologique) : insérer l'entrée vierge
+        # AVANT la première version journalisée.
+        awk -v version="$nouvelle_version" -v date="$date_du_jour" '
+            !insere && /^## \[/ {
+                printf "## [%s] – %s\n\n### Ajouté\n\n- (à compléter)\n\n", version, date
+                insere = 1
+            }
+            { print }
+        ' CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+    else
+        # Aucune version encore journalisée : créer la première entrée.
+        printf '\n## [%s] – %s\n\n### Ajouté\n\n- (à compléter)\n' "$nouvelle_version" "$date_du_jour" >> CHANGELOG.md
     fi
-    sed -i "s|^$marqueur|## [$nouvelle_version] – $date_du_jour|" CHANGELOG.md
 fi
 
 echo "version : $version_courante → $nouvelle_version (VERSION_CODE $code_courant → $nouveau_code)"

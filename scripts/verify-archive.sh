@@ -43,9 +43,14 @@ echo "[verify-archive] contrôle des exclusions…"
 # ---------------------------------------------------------------------------
 listing=$(unzip -Z1 "$archive")
 
-if [ -n "$(printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|(^|/)app/src/main/assets/tooling/|\.iml$|\.keystore$|\.jks$|\.DS_Store$' || true)" ]; then
+# Keystores : tous interdits SAUF l'identité debug PUBLIQUE versionnée
+# (ADR 0067) — l'archive doit pouvoir reproduire la signature sans quoi
+# son build autonome échouerait (storeFile manquant).
+keystores_interdits=$(printf '%s\n' "$listing" | grep -E '\.keystore$|\.jks$' | grep -vx 'config/signature/debug.keystore' || true)
+interdits=$(printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|(^|/)app/src/main/assets/tooling/|\.iml$|\.DS_Store$' || true)
+if [ -n "$interdits$keystores_interdits" ]; then
     echo "ERREUR : fichiers interdits dans l'archive :" >&2
-    printf '%s\n' "$listing" | grep -E '(^|/)(build|\.gradle|\.idea|\.kotlin|dist|captures|\.cxx)/|(^|/)local\.properties$|(^|/)app/src/main/assets/tooling/|\.iml$|\.keystore$|\.jks$|\.DS_Store$' >&2 || true
+    printf '%s\n%s\n' "$interdits" "$keystores_interdits" | grep -v '^$' >&2 || true
     exit 1
 fi
 echo "[verify-archive] aucun fichier interdit"
@@ -54,7 +59,7 @@ echo "[verify-archive] aucun fichier interdit"
 # 3. Contenu obligatoire (wrapper, build-logic, sources).
 # ---------------------------------------------------------------------------
 echo "[verify-archive] contrôle du contenu obligatoire…"
-for obligatoire in gradlew gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties build-logic/build.gradle.kts settings.gradle.kts version.properties; do
+for obligatoire in gradlew gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties build-logic/build.gradle.kts settings.gradle.kts version.properties config/signature/debug.keystore; do
     if ! printf '%s\n' "$listing" | grep -x "$obligatoire" >/dev/null; then
         echo "ERREUR : $obligatoire manquant dans l'archive" >&2
         exit 1

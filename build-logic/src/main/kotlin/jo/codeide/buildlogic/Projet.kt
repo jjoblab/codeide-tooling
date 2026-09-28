@@ -5,6 +5,7 @@ import com.diffplug.gradle.spotless.SpotlessExtension
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalog
 import org.gradle.api.artifacts.VersionCatalogsExtension
+import java.io.File
 import java.util.Properties
 
 /**
@@ -27,6 +28,52 @@ internal fun Project.catalogInt(name: String): Int =
         .orElseThrow { org.gradle.api.GradleException("Version '$name' absente du catalogue libs.versions.toml") }
         .toString()
         .toInt()
+
+/**
+ * Paramètres de signature RELEASE résolus par l'échelle hors dépôt (ADR 0067).
+ *
+ * @param fichierMagasin keystore résolu (existe sur le disque).
+ * @param motDePasseMagasin mot de passe du magasin.
+ * @param alias alias de la clé.
+ * @param motDePasseCle mot de passe de la clé.
+ */
+internal data class ParametresSignatureRelease(
+    val fichierMagasin: File,
+    val motDePasseMagasin: String?,
+    val alias: String?,
+    val motDePasseCle: String?,
+)
+
+/**
+ * Résout la signature RELEASE par l'échelle hors dépôt (ADR 0067, patron
+ * CodeAssist) : `config/signature/keystore.properties` (gitignoré) →
+ * propriété Gradle `-PRELEASE_*` → variable d'environnement `RELEASE_*`.
+ *
+ * Renvoie `null` quand aucun keystore n'est résolu : la variante release
+ * reste alors non signée, exactement comme avant l'ADR 0067 — la clé de
+ * release ne vit JAMAIS dans le dépôt.
+ */
+internal fun Project.parametresSignatureRelease(): ParametresSignatureRelease? {
+    val proprietes = Properties().apply {
+        val fichier = rootDir.resolve("config/signature/keystore.properties")
+        if (fichier.isFile) fichier.inputStream().use { load(it) }
+    }
+
+    fun valeur(cle: String, proprieteGradle: String, env: String): String? =
+        proprietes.getProperty(cle)
+            ?: (findProperty(proprieteGradle) as String?)
+            ?: System.getenv(env)
+
+    val cheminMagasin = valeur("storeFile", "RELEASE_STORE_FILE", "RELEASE_STORE_FILE")
+    val fichierMagasin = cheminMagasin?.let { rootDir.resolve(it) }
+    if (fichierMagasin == null || !fichierMagasin.isFile) return null
+    return ParametresSignatureRelease(
+        fichierMagasin = fichierMagasin,
+        motDePasseMagasin = valeur("storePassword", "RELEASE_STORE_PASSWORD", "RELEASE_STORE_PASSWORD"),
+        alias = valeur("keyAlias", "RELEASE_KEY_ALIAS", "RELEASE_KEY_ALIAS"),
+        motDePasseCle = valeur("keyPassword", "RELEASE_KEY_PASSWORD", "RELEASE_KEY_PASSWORD"),
+    )
+}
 
 /**
  * Lit la version applicative dans `version.properties` (source unique, section 9.1).

@@ -12,8 +12,10 @@ import org.jetbrains.kotlin.gradle.dsl.KotlinAndroidProjectExtension
  * Convention `codeide.android.application` — module d'application `app`.
  *
  * Porte l'identifiant imposé `jo.codeide` (règle : ne jamais le changer),
- * la version lue dans `version.properties` (source unique, section 9.1) et
- * la configuration release avec minification (section 6 du prompt).
+ * la version lue dans `version.properties` (source unique, section 9.1),
+ * la configuration release avec minification (section 6 du prompt) et
+ * la politique de signature de l'ADR 0067 (identité debug publique
+ * versionnée + échelle release hors dépôt).
  */
 class AndroidApplicationConventionPlugin : Plugin<Project> {
     override fun apply(project: Project) {
@@ -24,6 +26,7 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
             pluginManager.apply("org.jetbrains.kotlinx.kover")
 
             val (nomVersion, codeVersion) = lireVersion()
+            val signatureRelease = parametresSignatureRelease()
 
             extensions.configure<ApplicationExtension> {
                 // Namespace racine de l'application (section 2 : jo.codeide).
@@ -40,6 +43,39 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                     versionName = nomVersion
                 }
 
+                // Politique de signature (ADR 0067). DEBUG : keystore
+                // PUBLIC versionné dans config/signature/ — le runner GitHub
+                // n'embarque aucun ~/.android/debug.keystore et les caches
+                // actions/cache sont scopés par ref (runs de tags lancés en
+                // parallèle) et évictables (7 jours) : chaque APK CI portait
+                // une signature différente et Android refusait la mise à jour
+                // (« conflit de package », retours v0.35.2 puis v0.37.1).
+                // Versionner la clé debug — identifiants publics, patrons
+                // AOSP/CodeAssist — fixe l'identité pour la CI, les
+                // contributeurs et toute machine locale : les APK successifs
+                // se mettent à jour les uns sur les autres, partout.
+                val fichierCleDebug = rootDir.resolve("config/signature/debug.keystore")
+                check(fichierCleDebug.isFile) {
+                    "Keystore debug public manquant : ${fichierCleDebug.absolutePath} (ADR 0067) — " +
+                        "restituer le fichier depuis le dépôt."
+                }
+                signingConfigs {
+                    getByName("debug") {
+                        storeFile = fichierCleDebug
+                        storePassword = "android"
+                        keyAlias = "androiddebugkey"
+                        keyPassword = "android"
+                    }
+                    signatureRelease?.let { signature ->
+                        create("release") {
+                            storeFile = signature.fichierMagasin
+                            storePassword = signature.motDePasseMagasin
+                            keyAlias = signature.alias
+                            keyPassword = signature.motDePasseCle
+                        }
+                    }
+                }
+
                 buildTypes {
                     release {
                         // Section 6 : minification et réduction activées ;
@@ -50,6 +86,11 @@ class AndroidApplicationConventionPlugin : Plugin<Project> {
                             getDefaultProguardFile("proguard-android-optimize.txt"),
                             "proguard-rules.pro",
                         )
+                        // ADR 0067 : signée par l'échelle hors dépôt quand un
+                        // keystore release est résolu, sinon NON signée
+                        // (comportement inchangé — la clé release ne vit
+                        // jamais dans le dépôt).
+                        signingConfig = signingConfigs.findByName("release")
                     }
                 }
 

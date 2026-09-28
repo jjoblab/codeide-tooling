@@ -17,9 +17,17 @@ captures/
 # Natif
 .cxx/
 
-# Signatures et secrets — jamais dans le dépôt ni dans les archives.
+# Signatures — les clés RELEASE ne vivent jamais dans le dépôt ni dans les
+# archives (AGENTS.md règle 7). Exception ADR 0067 : l'identité debug
+# PUBLIQUE (identifiants connus android/androiddebugkey, patrons
+# AOSP/CodeAssist) est versionnée — le runner GitHub n'a aucun
+# ~/.android/debug.keystore stable et les caches actions/cache sont scopés
+# par ref et évictables : sans clé commune, chaque APK CI portait une
+# signature différente (« conflit de package » à chaque mise à jour).
 *.keystore
 *.jks
+!config/signature/debug.keystore
+config/signature/keystore.properties
 !gradle/wrapper/gradle-wrapper.jar
 
 # Système
