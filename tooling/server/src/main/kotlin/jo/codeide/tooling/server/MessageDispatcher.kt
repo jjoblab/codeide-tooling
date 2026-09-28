@@ -190,12 +190,32 @@ internal class MessageDispatcher(
         }
     }
 
+    /**
+     * Répond au ping **hors du bus** (v0.37.3 — correctif « connexion avec
+     * l'orchestrateur perdue » récurrente en plein build).
+     *
+     * Le bus est borné (8192) et son `publier` BLOQUE l'émetteur sous
+     * contre-pression : pendant un build bavard, la file se remplit de
+     * `BuildOutput` et le pong s'y ensevelissait — le daemon ne voyait plus
+     * arriver de pong, déclarait l'orchestrateur muet (délai de santé) et le
+     * TUAIT au milieu du build. Le pong est la seule frame qui ne doit
+     * JAMAIS attendre : il est écrit DIRECTEMENT sur le socket.
+     *
+     * Sécurité de l'écriture croisée : [SocketClient.envoyer] est
+     * `@Synchronized` — chaque frame reste atomique, aucun entrelacement
+     * possible avec le consommateur du bus ; seul l'ordre RELATIF
+     * pong/événements peut s'inverser, sans conséquence (le pong ne porte
+     * aucune relation d'ordre avec les autres frames).
+     */
     private fun repondrePong(requete: PingMessage) {
-        bus.publier(
-            PongMessage(
-                id = requete.id,
-                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-            ),
+        socket.envoyer(
+            ProtocolJson
+                .encoder(
+                    PongMessage(
+                        id = requete.id,
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                    ),
+                ).encodeToByteArray(),
         )
     }
 
