@@ -1,1 +1,1 @@
-{"type":"sync_progress","id":"evt-43","protocolVersion":5,"projectDir":"/projets/demo","phase":"DEPENDANCES","terminee":false,"dureeMs":0,"octetsRecus":44040192,"octetsTotal":null,"element":"kotlin-stdlib-2.2.10.jar","compteur":3,"total":null,"sautee":false}
+{"type":"sync_progress","id":"evt-43","protocolVersion":5,"projectDir":"/projets/demo","phase":"DEPENDANCES","terminee":false,"dureeMs":0,"octetsRecus":44040192,"octetsTotal":null,"element":"kotlin-stdlib-2.2.10.jar","compteur":3,"total":null}

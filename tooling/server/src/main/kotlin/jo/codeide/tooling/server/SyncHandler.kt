@@ -96,14 +96,13 @@ internal class SyncHandler(
                 return
             }
 
-        // ---- DISTRIBUTION (v5, aperçu) : SAUTÉE honnêtement quand elle
-        // est déjà en cache (la rangée du client porte « en cache », aucun
-        // « ✓ 0 s » d'un travail qui n'a pas eu lieu) ; ouverte et sondée
-        // pendant l'action quand elle MANQUE — la Tooling API y télécharge
-        // la distribution paresseusement. -------------------------------
-        if (EtatsDistribution.estInstallee(urlWrapper)) {
-            phases.sauter(SyncPhase.DISTRIBUTION, element = urlWrapper?.substringAfterLast('/'))
-        } else {
+        // ---- DISTRIBUTION (v6, prompt de suivi §2 : une phase qui n'a
+        // pas lieu n'est plus émise du tout — fini le « En cache ») :
+        // si la distribution est déjà en cache, on ne l'ouvre PAS et on
+        // ne la conclut PAS — le client ne l'affiche pas du tout. Si elle
+        // MANQUE, on l'ouvre et le sondeur la conclut quand le téléchargement
+        // se termine. -----------------------------------------------------
+        if (!EtatsDistribution.estInstallee(urlWrapper)) {
             phases.ouvrir(SyncPhase.DISTRIBUTION, element = urlWrapper?.substringAfterLast('/'))
         }
 

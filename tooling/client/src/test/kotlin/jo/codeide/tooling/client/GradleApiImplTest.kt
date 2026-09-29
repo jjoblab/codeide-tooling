@@ -521,34 +521,10 @@ class GradleApiImplTest {
             assertEquals("le dossier annoncé voyage", "/p", etapes[0].projectDir)
         }
 
-    @Test
-    fun `une phase SAUTEE en cache traverse avec son drapeau - v5`() =
-        runBlocking {
-            val session = SessionFactice()
-            val api = nouvelleApi()
-            api.ouvrirSession(session)
-
-            session.emettre(
-                SyncProgress(
-                    nouvelId(),
-                    protocole,
-                    "/p",
-                    SyncPhase.DISTRIBUTION,
-                    terminee = true,
-                    sautee = true,
-                    element = "gradle-9.7.1-bin.zip",
-                ),
-            )
-
-            val etape =
-                withTimeout(5_000) {
-                    api.observeSyncProgress().first()
-                }
-            assertEquals(EtapeSync.DISTRIBUTION, etape.etape)
-            assertTrue("sautée : le client rend la rangée « en cache »", etape.sautee)
-            assertTrue(etape.terminee)
-            assertEquals("gradle-9.7.1-bin.zip", etape.element)
-        }
+    // v6 (prompt de suivi §2) : le test `une phase SAUTEE en cache traverse
+    // avec son drapeau` est SUPPRIMÉ — le drapeau `sautee` n'existe plus. Une
+    // phase qui n'a pas lieu n'est plus émise par le serveur, le client ne
+    // la reçoit pas.
 
     @Test
     fun `les arguments du build voyagent avec la requete - v3`() =

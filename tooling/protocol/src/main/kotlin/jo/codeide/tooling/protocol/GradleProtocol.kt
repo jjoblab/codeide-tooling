@@ -30,6 +30,11 @@ public object GradleProtocol {
      * d'avance (distribution Gradle déjà en cache) se déclare SAUTÉE et non
      * achevée : la console n'affiche un téléchargement que s'il a LIEU, la
      * rangée porte « en cache ».
+     *
+     * v6 (prompt de suivi §2) : le drapeau `sautee` est SUPPRIMÉ — une phase
+     * qui n'a pas lieu n'est plus émise du tout. Le catalogue affiché est
+     * construit pour la sync en cours (étape non concernée = absente de la
+     * liste). Cf. ADR 0073 à venir.
      */
     public const val PROTOCOL_VERSION: Int = 5
 
