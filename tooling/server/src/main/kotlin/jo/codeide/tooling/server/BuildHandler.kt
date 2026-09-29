@@ -16,6 +16,7 @@ import org.gradle.tooling.ResultHandler
 import org.gradle.tooling.events.OperationType
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -68,6 +69,13 @@ internal class BuildHandler(
                 tasks = requete.tasks,
             ),
         )
+        // v0.39.1 (correctif n°4) : accumulateur de la synthèse de fin de
+        // build (« N actionable tasks: M executed[, K up-to-date] ») —
+        // extrait au fil de l'eau par l'observateur du flux stdout, lu à
+        // la fin pour remplir [BuildFinished]. Un AtomicReference permet
+        // à l'observateur synchrone du flux (autre fil Gradle) d'écrire
+        // sans verrou depuis le thread qui LIT le build.
+        val synthese = AtomicReference<SyntheseBuild?>(null)
         try {
             val connexion = pool.connexion(File(requete.projectDir))
             // v4 (addendum §6) : les téléchargements et la configuration se
@@ -76,19 +84,28 @@ internal class BuildHandler(
             val ecouteurProgression = ecouteurProgressionDu(requete.buildId)
             withTimeout(delaiMs) {
                 suspendCancellableCoroutine { suite ->
-                    val lanceur = fabriquerLanceur(requete, connexion, jeton, ecouteurProgression)
+                    val lanceur = fabriquerLanceur(requete, connexion, jeton, ecouteurProgression, synthese)
                     suite.invokeOnCancellation { jeton.cancel() }
                     lanceur.run(handlerResultat(suite))
                 }
             }
-            publierFin(requete.buildId, reussi = true, debut, null)
+            publierFin(requete.buildId, reussi = true, debut, null, synthese.get())
         } catch (delai: TimeoutCancellationException) {
             Journal.warn("build ${requete.buildId} : garde de $delaiMs ms dépassée (${delai.message})")
             jeton.cancel()
-            publierFin(requete.buildId, reussi = false, debut, "délai de $delaiMs ms dépassé")
+            publierFin(requete.buildId, reussi = false, debut, "délai de $delaiMs ms dépassé", synthese.get())
         } catch (annulation: CancellationException) {
             jeton.cancel()
-            publierFin(requete.buildId, reussi = false, debut, "annulé")
+            // v0.39.1 (correctif n°5) : distingué de l'échec — l'UI affiche
+            // « Build annulé » (atténué) au lieu de « Échec du build » (rouge).
+            publierFin(
+                requete.buildId,
+                reussi = false,
+                debut,
+                "annulé",
+                synthese.get(),
+                annule = true,
+            )
             throw annulation
         } catch (echec: GradleConnectionException) {
             publierFin(
@@ -96,9 +113,10 @@ internal class BuildHandler(
                 reussi = false,
                 debut,
                 messageDEchec(echec),
+                synthese.get(),
             )
         } catch (t: Throwable) {
-            publierFin(requete.buildId, reussi = false, debut, messageDEchec(t))
+            publierFin(requete.buildId, reussi = false, debut, messageDEchec(t), synthese.get())
         } finally {
             annulations.remove(requete.buildId)
         }
@@ -176,13 +194,27 @@ internal class BuildHandler(
         connexion: org.gradle.tooling.ProjectConnection,
         jeton: CancellationTokenSource,
         ecouteurProgression: EcouteurProgressionCommun,
+        synthese: AtomicReference<SyntheseBuild?>,
     ): org.gradle.tooling.BuildLauncher =
         connexion
             .newBuild()
             .forTasks(*requete.tasks.toTypedArray())
             .withArguments(requete.arguments + CONSOLE_TEXTE)
+            // v0.39.1 (correctif n°4) : l'observateur du flux stdout allume
+            // l'accumulateur de synthèse dès qu'il voit la ligne
+            // « N actionable tasks: M executed[, K up-to-date] ». Comme
+            // l'observateur est appelé AVANT la publication du BuildOutput
+            // (cf. StreamingOutputStream.viderLigne), la synthèse est
+            // prête quand le build se termine — sans doublon de publication.
             .setStandardOutput(
-                StreamingOutputStream(requete.buildId, StreamKind.STDOUT, bus),
+                StreamingOutputStream(
+                    requete.buildId,
+                    StreamKind.STDOUT,
+                    bus,
+                    observateur = { ligne ->
+                        ParseurSyntheseBuild.analyser(ligne)?.let { synthese.set(it) }
+                    },
+                ),
             ).setStandardError(
                 StreamingOutputStream(
                     requete.buildId,
@@ -220,11 +252,14 @@ internal class BuildHandler(
             }
         }
 
+    @Suppress("LongParameterList") // boîte de conclusion d'un build — 6 champs arrival
     private fun publierFin(
         buildId: String,
         reussi: Boolean,
         debut: Long,
         message: String?,
+        synthese: SyntheseBuild?,
+        annule: Boolean = false,
     ) {
         bus.publier(
             BuildFinished(
@@ -234,6 +269,21 @@ internal class BuildHandler(
                 succeeded = reussi,
                 durationMs = System.currentTimeMillis() - debut,
                 failureMessage = message,
+                // v0.39.1 (correctif n°5) : un build ANNULÉ n'est pas un
+                // échec — l'UI affiche l'état `ANNULE` atténué, pas le
+                // rouge `ECHOUE`. Le serveur était jusqu'ici muet sur la
+                // cause (toujours `succeeded=false`, message "annulé"),
+                // le client ne pouvait pas distinguer l'annulation de
+                // l'échec réel.
+                cancelled = annule,
+                // v0.39.1 (correctif n°4) : la synthèse d'Android Studio
+                // (« N actionable tasks: M executed[, K up-to-date] »)
+                // voyage structurée — le client la restitue dans la
+                // console sans re-parser le stdout. `null` quand la ligne
+                // n'a pas été observée (build échoué avant la fin).
+                actionableTasks = synthese?.actionableTasks,
+                executedTasks = synthese?.executedTasks,
+                upToDateTasks = synthese?.upToDateTasks,
             ),
         )
     }
