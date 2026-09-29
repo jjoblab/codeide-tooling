@@ -872,14 +872,34 @@ class GradleApiImpl
          * complète : aucune perte, aucun collecteur laissé en suspens. La
          * mémoire est bornée par la durée de la SESSION :
          * [fermerSession] nettoie tout.
+         *
+         * v0.39.1 (correctif n°4) : la synthèse d'Android Studio
+         * (« N actionable tasks: M executed[, K up-to-date] ») extraite
+         * côté serveur de la dernière ligne stdout de Gradle voyage dans
+         * [BuildFinished] — on la propage à [EtatBuild] pour que la
+         * console l'affiche sous le verdict, comme Android Studio.
+         *
+         * v0.39.1 (correctif n°5) : un build ANNULÉ (`cancelled = true`)
+         * est distingué d'un échec réel — `StatutBuild.ANNULE` au lieu de
+         * `ECHOUE`. La pastille du BottomSheet rend l'annulation en mode
+         * atténué, pas en rouge d'échec.
          */
         private fun pomperFin(evenement: BuildFinished) {
+            val statutFinal =
+                when {
+                    evenement.succeeded -> StatutBuild.REUSSI
+                    evenement.cancelled -> StatutBuild.ANNULE
+                    else -> StatutBuild.ECHOUE
+                }
             etat(evenement.buildId).value =
                 EtatBuild(
                     buildId = evenement.buildId,
-                    statut = if (evenement.succeeded) StatutBuild.REUSSI else StatutBuild.ECHOUE,
+                    statut = statutFinal,
                     dureeMs = evenement.durationMs,
                     messageEchec = evenement.failureMessage,
+                    tachesActionnables = evenement.actionableTasks,
+                    tachesExecutees = evenement.executedTasks,
+                    tachesAJour = evenement.upToDateTasks,
                 )
             sorties[evenement.buildId]?.close()
             tachesParBuild[evenement.buildId]?.close()

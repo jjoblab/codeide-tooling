@@ -204,6 +204,32 @@ public data class BuildFinished(
     public val succeeded: Boolean,
     public val durationMs: Long,
     public val failureMessage: String? = null,
+    /**
+     * `true` quand le build a été ANNULÉ à la demande de l'utilisateur
+     * (v0.39.1, correctif n°5 — distingué de l'échec pour la pastille du
+     * BottomSheet : un build annulé n'est PAS un échec, l'UI affiche
+     * l'état `ANNULE` atténué, pas le rouge `ECHOUE`). Quand `succeeded`
+     * est `false` et `cancelled` est `false`, l'échec est RÉEL.
+     */
+    public val cancelled: Boolean = false,
+    /**
+     * Total des tâches ACTIONNABLES du build (v0.39.1, correctif n°4 —
+     * synthèse d'Android Studio « N actionable tasks ») : extrait de la
+     * dernière ligne stdout de Gradle. `null` quand la ligne n'a pas été
+     * observée (build échoué avant la fin, sortie non détectable).
+     */
+    public val actionableTasks: Int? = null,
+    /**
+     * Tâches réellement EXÉCUTÉES (v0.39.1) : « N executed » dans la
+     * synthèse de Gradle. `null` quand inconnu.
+     */
+    public val executedTasks: Int? = null,
+    /**
+     * Tâches À JOUR (incrémental, v0.39.1) : « K up-to-date » dans la
+     * synthèse de Gradle. `null` quand la version incrémentale n'a pas
+     * été imprimée (build sans cache, premier lancement).
+     */
+    public val upToDateTasks: Int? = null,
 ) : ToolingEvent
 
 /** Progression générique (opérations Gradle, pas seulement tâches).

@@ -21,14 +21,25 @@ public fun BuildOutput.versLigneSortie(): LigneSortieBuild =
         horodatageMs = timestampMs,
     )
 
-/** Le résultat terminal d'un build, sans distinction annulé/échoué (le
- * client la détient : c'est lui qui a demandé l'annulation). */
+/** Le résultat terminal d'un build — l'ANNULATION est distinguée de
+ *  l'échec (v0.39.1, correctif n°5) : un build `succeeded=false` avec
+ *  `cancelled=true` devient `StatutBuild.ANNULE`, pas `ECHOUE`. La
+ *  synthèse d'Android Studio (« N actionable tasks: M executed[,
+ *  K up-to-date] ») est également propagée (correctif n°4). */
 public fun BuildFinished.versEtatBuild(): EtatBuild =
     EtatBuild(
         buildId = buildId,
-        statut = if (succeeded) StatutBuild.REUSSI else StatutBuild.ECHOUE,
+        statut =
+            when {
+                succeeded -> StatutBuild.REUSSI
+                cancelled -> StatutBuild.ANNULE
+                else -> StatutBuild.ECHOUE
+            },
         dureeMs = durationMs,
         messageEchec = failureMessage,
+        tachesActionnables = actionableTasks,
+        tachesExecutees = executedTasks,
+        tachesAJour = upToDateTasks,
     )
 
 /** Un instantané du tas de l'orchestrateur (§4.6). */

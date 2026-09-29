@@ -70,7 +70,17 @@ internal object EchantillonsMessages {
                 durationMs = 2_345,
                 skipped = false,
             ),
-            BuildFinished(ID_EVENEMENT, VERSION, buildId = "build-7", succeeded = true, durationMs = 1_250),
+            BuildFinished(
+                ID_EVENEMENT,
+                VERSION,
+                buildId = "build-7",
+                succeeded = true,
+                durationMs = 1_250,
+                cancelled = false,
+                actionableTasks = 37,
+                executedTasks = 2,
+                upToDateTasks = 35,
+            ),
             ProgressEvent(
                 ID_EVENEMENT,
                 VERSION,
