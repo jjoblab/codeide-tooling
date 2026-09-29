@@ -493,18 +493,18 @@ class GradleApiImplTest {
             val api = nouvelleApi()
             api.ouvrirSession(session)
 
-            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.CONNEXION))
+            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.DAEMON))
             session.emettre(
-                SyncProgress(nouvelId(), protocole, "/p", SyncPhase.CONNEXION, terminee = true, dureeMs = 1_500),
+                SyncProgress(nouvelId(), protocole, "/p", SyncPhase.DAEMON, terminee = true, dureeMs = 1_500),
             )
-            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.MODELE_GRADLE))
+            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.MODELE_TACHES))
 
             val etapes = mutableListOf<EtapeSyncTooling>()
             withTimeout(5_000) {
                 api.observeSyncProgress().take(3).toList(etapes)
             }
             assertEquals(
-                listOf(EtapeSync.CONNEXION, EtapeSync.CONNEXION, EtapeSync.MODELE_GRADLE),
+                listOf(EtapeSync.DAEMON, EtapeSync.DAEMON, EtapeSync.MODELE_TACHES),
                 etapes.map { it.etape },
             )
             assertEquals(

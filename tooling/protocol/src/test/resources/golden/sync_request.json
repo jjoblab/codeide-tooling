@@ -1,7 +1,1 @@
-{
-  "type": "sync_request",
-  "id": "req-42",
-  "protocolVersion": 3,
-  "projectDir": "/projets/demo",
-  "gradleVersion": "9.7.1"
-}
+{"type":"sync_request","id":"req-42","protocolVersion":4,"projectDir":"/projets/demo","gradleVersion":"9.7.1","arguments":["--offline"]}

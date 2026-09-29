@@ -70,35 +70,13 @@ internal class BuildHandler(
         )
         try {
             val connexion = pool.connexion(File(requete.projectDir))
+            // v4 (addendum §6) : les téléchargements et la configuration se
+            // VOIENT pour le build aussi — écouteur commun, borné en débit,
+            // rattaché à CE build (compteurs remis à zéro par build).
+            val ecouteurProgression = ecouteurProgressionDu(requete.buildId)
             withTimeout(delaiMs) {
                 suspendCancellableCoroutine { suite ->
-                    val lanceur =
-                        connexion
-                            .newBuild()
-                            // Exemption detekt ciblée (règle 16) : SpreadOperator —
-                            // la Tooling API n'expose `forTasks` qu'en vararg
-                            // (aucune surcharge Iterable<String>), l'éclatement
-                            // de la liste est l'unique option.
-                            .forTasks(*requete.tasks.toTypedArray())
-                            // --console=plain TOUJOURS en fin de liste : la
-                            // dernière occurrence gagne chez Gradle — un client
-                            // qui passerait son propre --console resterait maître.
-                            .withArguments(requete.arguments + CONSOLE_TEXTE)
-                            .setStandardOutput(
-                                StreamingOutputStream(requete.buildId, StreamKind.STDOUT, bus),
-                            ).setStandardError(
-                                // G5 : la sortie d'erreur porte AUSSI les
-                                // diagnostics de compilation (javac/kotlinc y
-                                // écrivent leurs positions, pas dans le
-                                // message d'échec final).
-                                StreamingOutputStream(
-                                    requete.buildId,
-                                    StreamKind.STDERR,
-                                    bus,
-                                    observateur = ::publierDiagnostics,
-                                ),
-                            ).addProgressListener(ProgressBridge(requete.buildId, bus), OperationType.TASK)
-                            .withCancellationToken(jeton.token())
+                    val lanceur = fabriquerLanceur(requete, connexion, jeton, ecouteurProgression)
                     suite.invokeOnCancellation { jeton.cancel() }
                     lanceur.run(handlerResultat(suite))
                 }
@@ -137,10 +115,88 @@ internal class BuildHandler(
         return true
     }
 
+    /**
+     * Écouteur des téléchargements et de la configuration pour CE build
+     * (v4, addendum §6) : chaque `FILE_DOWNLOAD` devient un
+     * [jo.codeide.tooling.protocol.ProgressEvent] structuré —
+     * « Téléchargement des dépendances n / N » se voit dans l'arbre du
+     * build COMME dans celui de la sync. Compteurs remis à zéro par build.
+     */
+    private fun ecouteurProgressionDu(buildId: String): EcouteurProgressionCommun =
+        EcouteurProgressionCommun(
+            surTelechargement = { detail ->
+                bus.publier(
+                    jo.codeide.tooling.protocol.ProgressEvent(
+                        id = nouvelId(),
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        buildId = buildId,
+                        message = "Téléchargement ${detail.element}",
+                        telechargement = detail,
+                    ),
+                )
+            },
+            surConfiguration = { element, terminee, compteur ->
+                bus.publier(
+                    jo.codeide.tooling.protocol.ProgressEvent(
+                        id = nouvelId(),
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        buildId = buildId,
+                        message =
+                            if (terminee) {
+                                "Configuration $element — $compteur"
+                            } else {
+                                "Configuration $element…"
+                            },
+                    ),
+                )
+            },
+        )
+
     /** Toutes les annulations en vol (arrêt propre du serveur). */
     fun toutAnnuler() {
         annulations.values.forEach { it.cancel() }
     }
+
+    /**
+     * Fabrique le lanceur du build : tâches, arguments (`--console=plain`
+     * TOUJOURS en fin de liste — la dernière occurrence gagne chez Gradle,
+     * un client qui passerait son propre --console resterait maître),
+     * sorties ligne à ligne (stderr porte AUSSI les diagnostics de
+     * compilation — G5 : javac/kotlinc y écrivent leurs positions, pas
+     * dans le message d'échec final), pont des tâches, écouteur des
+     * téléchargements/configuration (v4 §6) et jeton d'annulation.
+     *
+     * Exemption detekt ciblée (règle 16) : SpreadOperator — la Tooling API
+     * n'expose `forTasks` qu'en vararg (aucune surcharge `Iterable<String>`),
+     * l'éclatement de la liste est l'unique option.
+     */
+    @Suppress("SpreadOperator")
+    private fun fabriquerLanceur(
+        requete: BuildRequest,
+        connexion: org.gradle.tooling.ProjectConnection,
+        jeton: CancellationTokenSource,
+        ecouteurProgression: EcouteurProgressionCommun,
+    ): org.gradle.tooling.BuildLauncher =
+        connexion
+            .newBuild()
+            .forTasks(*requete.tasks.toTypedArray())
+            .withArguments(requete.arguments + CONSOLE_TEXTE)
+            .setStandardOutput(
+                StreamingOutputStream(requete.buildId, StreamKind.STDOUT, bus),
+            ).setStandardError(
+                StreamingOutputStream(
+                    requete.buildId,
+                    StreamKind.STDERR,
+                    bus,
+                    observateur = ::publierDiagnostics,
+                ),
+            ).addProgressListener(ProgressBridge(requete.buildId, bus), OperationType.TASK)
+            // v4 (§6) : téléchargements + configuration du build.
+            .addProgressListener(
+                ecouteurProgression,
+                OperationType.FILE_DOWNLOAD,
+                OperationType.PROJECT_CONFIGURATION,
+            ).withCancellationToken(jeton.token())
 
     /**
      * Publie le diagnostic extrait d'une ligne de stderr (G5) — une ligne

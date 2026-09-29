@@ -1,13 +1,1 @@
-{
-  "type": "partial_sync_result",
-  "id": "evt-43",
-  "protocolVersion": 3,
-  "projectDir": "/projets/demo",
-  "resolvedModels": [
-    "idea",
-    "tasks"
-  ],
-  "failedModels": [
-    "dependencies"
-  ]
-}
+{"type":"partial_sync_result","id":"evt-43","protocolVersion":4,"projectDir":"/projets/demo","resolvedModels":["idea","tasks"],"failedModels":["dependencies"]}

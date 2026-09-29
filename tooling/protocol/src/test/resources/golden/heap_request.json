@@ -1,5 +1,1 @@
-{
-  "type": "heap_request",
-  "id": "req-42",
-  "protocolVersion": 3
-}
+{"type":"heap_request","id":"req-42","protocolVersion":4}

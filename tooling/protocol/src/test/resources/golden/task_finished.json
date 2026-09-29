@@ -1,10 +1,1 @@
-{
-  "type": "task_finished",
-  "id": "evt-43",
-  "protocolVersion": 3,
-  "buildId": "build-7",
-  "taskPath": ":app:compileKotlin",
-  "succeeded": true,
-  "durationMs": 2345,
-  "skipped": false
-}
+{"type":"task_finished","id":"evt-43","protocolVersion":4,"buildId":"build-7","taskPath":":app:compileKotlin","succeeded":true,"durationMs":2345,"skipped":false}

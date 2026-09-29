@@ -12,14 +12,21 @@ public object GradleProtocol {
     /**
      * Version courante du protocole (négociée au handshake, §4.4/§3.2).
      *
-     * v3 (affichage des tâches, G5 abouti) : nouveau [SyncProgress] pendant
-     * la synchronisation (phases structurées — la sync cesse d'être une boîte
-     * noire), [TaskFinished] enrichi de `durationMs` et `skipped`. Le
-     * handshake exige l'égalité EXACTE des deux côtés : un orchestrateur v3
-     * qui parlerait à une app v2 est refusé avec un message clair au lieu
-     * d'échouer au décodage d'un événement inconnu.
+     * v4 (tooling professionnel) : phases de sync RÉELLES ([SyncPhase] passe
+     * de CONNEXION/MODELE_GRADLE/MODELE_IDEA à OUTILS → DISTRIBUTION →
+     * DAEMON → CONFIGURATION → MODELE_TACHES → MODELE_IDE → DEPENDANCES →
+     * CLASSPATHS — la connexion ne télécharge rien, l'ancienne phase mentait) ;
+     * [SyncProgress] enrichi de détails (octets reçus/total, élément,
+     * compteur n/total — champs à défaut, compatibles v3 côté décodage) ;
+     * [ProgressEvent] porteur d'un détail de téléchargement structuré pour
+     * le canal Build (addendum §6 : les téléchargements se voient pour TOUTE
+     * action Gradle) ; [SyncRequest] et [ClasspathRequest] embarquent les
+     * arguments réglés (`--offline`, arguments libres). Le handshake exige
+     * l'égalité EXACTE des deux côtés : un orchestrateur v4 qui parlerait à
+     * une app v3 est refusé avec un message clair au lieu d'échouer au
+     * décodage d'un événement inconnu.
      */
-    public const val PROTOCOL_VERSION: Int = 3
+    public const val PROTOCOL_VERSION: Int = 4
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"

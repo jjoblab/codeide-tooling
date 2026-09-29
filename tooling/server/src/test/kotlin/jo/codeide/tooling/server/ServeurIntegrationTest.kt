@@ -346,12 +346,22 @@ class ServeurIntegrationTest {
             "le SyncStarted doit précéder le SyncResult dans le flux (étape 32)",
             app.indicesDe<SyncStarted>().first() < app.indicesDe<SyncResult>().first(),
         )
-        // v3 : les phases de sync sont annoncées ENTRE le départ et le
-        // résultat — chaque phase au départ PUIS à la fin avec sa durée :
-        // la sync cesse d'être une boîte noire « en cours / terminée ».
+        // v4 : les phases RÉELLES sont annoncées ENTRE le départ et le
+        // résultat. Phases GARANTIES (v4 §3.1 — le déroulé honnête) :
+        // vérifications, distribution (conclue aussitôt : déjà installée),
+        // daemon, modèles de l'action UNIQUE, classpaths AVANT le résultat.
         val progressions = app.evenementsDe<SyncProgress>()
-        assertTrue("la sync devait annoncer ses phases (v3)", progressions.isNotEmpty())
-        SyncPhase.entries.forEach { phase ->
+        assertTrue("la sync devait annoncer ses phases (v4)", progressions.isNotEmpty())
+        val garanties =
+            listOf(
+                SyncPhase.OUTILS,
+                SyncPhase.DISTRIBUTION,
+                SyncPhase.DAEMON,
+                SyncPhase.MODELE_TACHES,
+                SyncPhase.MODELE_IDE,
+                SyncPhase.CLASSPATHS,
+            )
+        garanties.forEach { phase ->
             assertTrue(
                 "la phase $phase devait être annoncée au départ",
                 progressions.any { it.phase == phase && !it.terminee },
@@ -361,10 +371,96 @@ class ServeurIntegrationTest {
                 progressions.any { it.phase == phase && it.terminee && it.dureeMs >= 0 },
             )
         }
+        // Phases OPPORTUNISTES (CONFIGURATION, DEPENDANCES) : ouvertes
+        // SEULEMENT si Gradle émet les événements correspondants — une sync
+        // en cache ne reconfigure pas, une sync sans réseau ne télécharge
+        // pas (v4 : la phase absente est un FAIT, pas un mensonge). Si
+        // ouverte, elle doit être conclue.
+        listOf(SyncPhase.CONFIGURATION, SyncPhase.DEPENDANCES).forEach { phase ->
+            if (progressions.any { it.phase == phase && !it.terminee }) {
+                assertTrue(
+                    "la phase opportuniste $phase ouverte devait être conclue",
+                    progressions.any { it.phase == phase && it.terminee },
+                )
+            }
+        }
         assertTrue(
             "les phases doivent précéder le SyncResult",
             app.indicesDe<SyncProgress>().last() < app.indicesDe<SyncResult>().first(),
         )
+    }
+
+    @Test
+    fun `apres une sync le listage des taches repond depuis le cache v4`() {
+        val app = demarrer()
+        val projet = fixture("minimal-java")
+        // Pré-condition : une sync RÉUSSIE remplit le cache serveur (les
+        // tâches extraites de l'action unique, §3.1).
+        app.envoyer(
+            SyncRequest(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val resultatSync = app.attendre(DELAI_BUILD, SyncResult::class)
+        assertTrue("pré-condition : sync réussie", resultatSync.succeeded)
+
+        val identifiant = nouvelId()
+        val debut = System.nanoTime()
+        app.envoyer(
+            TasksRequest(
+                id = identifiant,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val taches = app.attendre(DELAI_BUILD, TasksResult::class)
+        val dureeMs = (System.nanoTime() - debut) / 1_000_000
+
+        assertEquals("écho de l'identifiant (corrélation §3.2)", identifiant, taches.id)
+        assertTrue(
+            "les tâches du cache devaient être servies : ${taches.tasks.joinToString { it.path }}",
+            taches.tasks.any { it.path.endsWith("saluer") },
+        )
+        // Depuis le cache : AUCUN aller-retour de modèle (une résolution
+        // réelle prend des secondes, même daemon chaud — le cache répond
+        // en quelques millisecondes).
+        assertTrue("le listage devait répondre depuis le cache ($dureeMs ms)", dureeMs < 2_000)
+    }
+
+    @Test
+    fun `le classpath repond depuis le cache apres une sync v4`() {
+        val app = demarrer()
+        val projet = fixture("minimal-java")
+        app.envoyer(
+            SyncRequest(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val resultatSync = app.attendre(DELAI_BUILD, SyncResult::class)
+        assertTrue("pré-condition : sync réussie", resultatSync.succeeded)
+
+        val identifiant = nouvelId()
+        val debut = System.nanoTime()
+        app.envoyer(
+            ClasspathRequest(
+                id = identifiant,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val classpath = app.attendre(DELAI_BUILD, ClasspathResult::class)
+        val dureeMs = (System.nanoTime() - debut) / 1_000_000
+
+        assertEquals("écho de l'identifiant (corrélation §3.2)", identifiant, classpath.id)
+        assertTrue(
+            "les modules du cache devaient être servis (ADR 0058) : ${classpath.modules.joinToString { it.name }}",
+            classpath.modules.isNotEmpty(),
+        )
+        assertTrue("le classpath devait répondre depuis le cache ($dureeMs ms)", dureeMs < 2_000)
     }
 
     @Test

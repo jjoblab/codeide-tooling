@@ -21,11 +21,12 @@ import java.io.File
  * de classes, modules frères portés par leur nom, jar de sources attaché
  * quand Gradle le connaît.
  *
- * La requête vit APRÈS la sync dans le parcours du client (même connexion
- * Tooling API, modèle `IdeaProject` déjà résolu et mis en cache par le
- * pool) : la réponse est PERSISTÉE par l'app sous
- * `.codeide/local/lsp-classpath.json` pour que les LSP s'en servent le
- * moment venu, sans re-résolution.
+ * v4 : répond D'ABORD depuis le [CacheSync] quand une sync a résolu
+ * l'action unique (aucun aller-retour, aucune re-résolution) ; sinon
+ * résout `IdeaProject` en direct, avec les arguments réglés de la requête
+ * (`--offline`, arguments libres — §3.1 : le classpath ne les ignorait
+ * plus). La réponse est PERSISTÉE par l'app sous
+ * `.codeide/local/lsp-classpath.json`.
  *
  * Les dépendances sans fichier localisable (variables d'AGP internes,
  * bibliothèques multi-fichiers) sont ignorées silencieusement : seules les
@@ -34,13 +35,34 @@ import java.io.File
 internal class ClasspathHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
+    private val cache: CacheSync,
 ) {
     /** Publie [ClasspathResult] : classpath compilé de chaque module. */
     suspend fun classpath(requete: ClasspathRequest) {
         val dossier = File(requete.projectDir)
+
+        // Cache d'abord (v4) : la sync a résolu l'action unique — le
+        // classpath en est un sous-produit, répondre sans re-résoudre.
+        cache.consulter(requete.projectDir)?.let { entree ->
+            bus.publier(
+                ClasspathResult(
+                    id = requete.id,
+                    protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                    projectDir = requete.projectDir,
+                    modules = entree.modules,
+                ),
+            )
+            return
+        }
+
         val modules =
             withContext(Dispatchers.IO) {
-                val idea = pool.connexion(dossier).model(IdeaProject::class.java).get()
+                val idea =
+                    pool
+                        .connexion(dossier)
+                        .model(IdeaProject::class.java)
+                        .withArguments(requete.arguments)
+                        .get()
                 idea.modules.all.map { module: IdeaModule -> module.versClasspath() }
             }
         bus.publier(

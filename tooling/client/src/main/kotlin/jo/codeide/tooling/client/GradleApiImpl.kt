@@ -302,6 +302,11 @@ class GradleApiImpl
                     etape = EtapeSync.valueOf(evenement.phase.name),
                     terminee = evenement.terminee,
                     dureeMs = evenement.dureeMs,
+                    octetsRecus = evenement.octetsRecus,
+                    octetsTotal = evenement.octetsTotal,
+                    element = evenement.element,
+                    compteur = evenement.compteur,
+                    total = evenement.total,
                 ),
             )
         }
@@ -455,13 +460,17 @@ class GradleApiImpl
         // Opérations (§5.3).
         // ------------------------------------------------------------------
 
-        override suspend fun synchroniser(projectDir: File): AppResult<ResultatSynchronisation> {
+        override suspend fun synchroniser(
+            projectDir: File,
+            arguments: List<String>,
+        ): AppResult<ResultatSynchronisation> {
             val reponse =
                 echanger(
                     SyncRequest(
                         id = nouvelIdentifiant(),
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = projectDir.canonicalPath,
+                        arguments = arguments,
                     ),
                     delaiMs = DELAI_SYNC_MS,
                 ) ?: return echecConnexion()
@@ -532,13 +541,17 @@ class GradleApiImpl
             }
         }
 
-        override suspend fun classpath(projectDir: File): AppResult<ClasspathProjet> {
+        override suspend fun classpath(
+            projectDir: File,
+            arguments: List<String>,
+        ): AppResult<ClasspathProjet> {
             val reponse =
                 echanger(
                     ClasspathRequest(
                         id = nouvelIdentifiant(),
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = projectDir.canonicalPath,
+                        arguments = arguments,
                     ),
                     delaiMs = DELAI_CLASSPATH_MS,
                 ) ?: return echecConnexion()

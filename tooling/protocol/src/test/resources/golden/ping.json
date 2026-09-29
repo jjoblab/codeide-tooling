@@ -1,5 +1,1 @@
-{
-  "type": "ping",
-  "id": "req-42",
-  "protocolVersion": 3
-}
+{"type":"ping","id":"req-42","protocolVersion":4}

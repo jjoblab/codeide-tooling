@@ -48,11 +48,12 @@ internal class MessageDispatcher(
     private val porteeRequetes = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(PARALLELISME))
 
     private val builds = BuildHandler(pool, bus)
-    private val synchronisations = SyncHandler(pool, bus)
-    private val taches = TasksHandler(pool, bus)
+    private val cacheSync = CacheSync()
+    private val synchronisations = SyncHandler(pool, bus, cacheSync)
+    private val taches = TasksHandler(pool, bus, cacheSync)
     private val modeles = ModelHandler(pool, bus)
     private val dependances = DependenciesHandler(pool, bus)
-    private val classpaths = ClasspathHandler(pool, bus)
+    private val classpaths = ClasspathHandler(pool, bus, cacheSync)
     private val tas = HeapMonitor(bus)
 
     /** Boucle de réception — retourne à la fin de connexion. */

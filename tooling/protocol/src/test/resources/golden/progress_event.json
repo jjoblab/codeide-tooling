@@ -1,7 +1,1 @@
-{
-  "type": "progress_event",
-  "id": "evt-43",
-  "protocolVersion": 3,
-  "buildId": "build-7",
-  "message": "Configuration cache reuse"
-}
+{"type":"progress_event","id":"evt-43","protocolVersion":4,"buildId":"build-7","message":"Téléchargement kotlin-stdlib-2.2.10.jar","telechargement":{"element":"kotlin-stdlib-2.2.10.jar","octetsRecus":1769000,"octetsTotal":1769000,"termine":true,"dureeMs":850,"compteur":3}}

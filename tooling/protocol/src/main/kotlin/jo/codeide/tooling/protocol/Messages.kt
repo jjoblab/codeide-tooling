@@ -206,7 +206,11 @@ public data class BuildFinished(
     public val failureMessage: String? = null,
 ) : ToolingEvent
 
-/** Progression générique (opérations Gradle, pas seulement tâches). */
+/** Progression générique (opérations Gradle, pas seulement tâches).
+ *  v4 (addendum §6) : porte aussi un DÉTAIL DE TÉLÉCHARGEMENT structuré
+ *  quand l'événement provient d'un `FILE_DOWNLOAD` — les téléchargements
+ *  sont visibles pour TOUTE action Gradle (build, sync, classpath,
+ *  listage), le message textuel reste pour les statuts génériques. */
 @Serializable
 @SerialName("progress_event")
 public data class ProgressEvent(
@@ -214,7 +218,34 @@ public data class ProgressEvent(
     override val protocolVersion: Int,
     public val buildId: String,
     public val message: String,
+    /** Détail structuré du téléchargement en cours — `null` pour un statut
+     *  textuel simple. */
+    public val telechargement: DetailTelechargement? = null,
 ) : ToolingEvent
+
+/**
+ * Détail d'un téléchargement observé pendant une action Gradle (v4,
+ * addendum §6) : nom d'artefact SANS donnée personnelle (dernier segment
+ * de l'URI), octets reçus/total si connus, compteur d'éléments terminés.
+ * Émis par l'écouteur commun, débit borné (au plus 5 événements/s par
+ * élément) pour ne pas saturer le bus.
+ */
+@Serializable
+@SerialName("detail_telechargement")
+public data class DetailTelechargement(
+    /** Élément téléchargé (dernier segment de l'URI — jamais un chemin local). */
+    public val element: String,
+    /** Octets reçus pour CET élément (au fil de l'eau). */
+    public val octetsRecus: Long = 0,
+    /** Octets totaux de l'élément si connus — `null` sinon. */
+    public val octetsTotal: Long? = null,
+    /** `true` quand l'élément est terminé (réussi OU échoué). */
+    public val termine: Boolean = false,
+    /** Durée du téléchargement à sa fin (ms). */
+    public val dureeMs: Long = 0,
+    /** Compteur d'éléments terminés de l'action (n) — `null` si sans objet. */
+    public val compteur: Int? = null,
+)
 
 /** Annule le build [buildId] (propagée vers `CancellationTokenSource`). */
 @Serializable
@@ -229,7 +260,10 @@ public data class CancelRequest(
 // Synchronisation et modèles (§5.3 — Resilient Sync).
 // ---------------------------------------------------------------------------
 
-/** Synchronise un projet (IDE-like : modèles, dépendances, tâches). */
+/** Synchronise un projet (IDE-like : modèles, dépendances, tâches).
+ *  v4 : les arguments réglés (`--offline`, arguments libres) voyagent
+ *  avec la requête — la sync ne les ignorait pas, elles s'appliquent
+ *  désormais à la configuration du build. */
 @Serializable
 @SerialName("sync_request")
 public data class SyncRequest(
@@ -237,6 +271,8 @@ public data class SyncRequest(
     override val protocolVersion: Int,
     public val projectDir: String,
     public val gradleVersion: String? = null,
+    /** Arguments Gradle de la sync (réglages tooling de l'utilisateur). */
+    public val arguments: List<String> = emptyList(),
 ) : ToolingRequest
 
 /**
@@ -281,16 +317,22 @@ public data class PartialSyncResult(
 ) : ToolingEvent
 
 /**
- * Phase d'une synchronisation (v3) : étape intermédiaire structurée entre
- * [SyncStarted] et [SyncResult]/[PartialSyncResult] — la sync cesse d'être
- * une boîte noire « en cours / terminée », l'app affiche CE que
- * l'orchestrateur fait (connexion au daemon Gradle, résolution de chaque
- * modèle) comme la console d'Android Studio déroule ses phases.
+ * Phase d'une synchronisation (v3 ; v4 : phases RÉELLES) : étape
+ * intermédiaire structurée entre [SyncStarted] et
+ * [SyncResult]/[PartialSyncResult] — la sync cesse d'être une boîte noire
+ * « en cours / terminée », l'app affiche CE que l'orchestrateur fait comme
+ * la console d'Android Studio déroule ses phases.
  *
  * Une phase est annoncée DEUX fois : au départ ([terminee] `false`) et à
  * la fin ([terminee] `true`, [dureeMs] de la phase) — le client en fait des
  * lignes de console du canal Sync. Les libellés restent côté client
  * (l'état voyage structuré, jamais localisé par le serveur).
+ *
+ * v4 : les détails de progression ([octetsRecus], [element], [compteur])
+ * alimentent le sous-titre de l'en-tête et les sous-lignes de l'arbre de
+ * la console — un téléchargement se VOIT, une phase ne reste muette que
+ * si Gradle lui-même est muet. Champs à défaut : un décodeur v3 ignore
+ * les inconnus, un émetteur v4 les omet quand l'information manque.
  */
 @Serializable
 @SerialName("sync_progress")
@@ -301,24 +343,57 @@ public data class SyncProgress(
     public val phase: SyncPhase,
     public val terminee: Boolean = false,
     public val dureeMs: Long = 0,
+    /** Octets reçus cumulés pour la phase (téléchargement) — 0 si sans objet. */
+    public val octetsRecus: Long = 0,
+    /** Octets totaux si CONNUS (souvent inconnus côté Tooling API) — sinon `null`. */
+    public val octetsTotal: Long? = null,
+    /** Élément courant (nom d'artefact/URL SANS donnée personnelle, projet). */
+    public val element: String? = null,
+    /** Compteur d'éléments terminés de la phase (n) — `null` si sans objet. */
+    public val compteur: Int? = null,
+    /** Total d'éléments de la phase (N) si CONNU — `null` sinon. */
+    public val total: Int? = null,
 ) : ToolingEvent
 
 /**
- * Phase énumérée d'une synchronisation (v3) — miroir câble de l'étape
- * domaine, l'UI choisit ses libellés.
+ * Phase énumérée d'une synchronisation (v4 — RÉELLES, dans l'ordre du
+ * déroulé) — miroir câble de l'étape domaine, l'UI choisit ses libellés.
+ * L'ancienne v3 mentait : `CONNEXION` (le `connect()` ne télécharge rien,
+ * la distribution se résout au premier `get()`), `MODELE_GRADLE`/
+ * `MODELE_IDEA` (deux requêtes séparées = deux configurations du build).
  */
 @Serializable
 public enum class SyncPhase {
-    /** Ouverture de la connexion Tooling API (première fois : lancement du
-     *  daemon Gradle, téléchargement de la distribution — la phase la plus
-     *  longue d'une première sync). */
-    CONNEXION,
+    /** Vérifications locales AVANT toute requête : dossier, wrapper
+     *  (version), JDK, distribution déjà en cache. */
+    OUTILS,
 
-    /** Résolution du modèle `GradleProject` (tâches du projet). */
-    MODELE_GRADLE,
+    /** Résolution de la distribution Gradle (téléchargement puis
+     *  décompression) — sa propre phase, plus noyée dans « connexion ». */
+    DISTRIBUTION,
 
-    /** Résolution du modèle `IdeaProject` (structure IDE, dépendances). */
-    MODELE_IDEA,
+    /** Démarrage du daemon Gradle (première requête sur un daemon froid). */
+    DAEMON,
+
+    /** Configuration des projets du build (événements
+     *  PROJECT_CONFIGURATION de la Tooling API, un par projet). */
+    CONFIGURATION,
+
+    /** Résolution du modèle `GradleProject` (tâches) — dans l'action
+     *  UNIQUE v4, plus de seconde configuration du build. */
+    MODELE_TACHES,
+
+    /** Résolution du modèle `IdeaProject` (structure IDE, dépendances) —
+     *  dans la MÊME action unique. */
+    MODELE_IDE,
+
+    /** Téléchargement des dépendances (événements FILE_DOWNLOAD de la
+     *  Tooling API : artefact, octets reçus, compteur n/N). */
+    DEPENDANCES,
+
+    /** Préparation des classpaths LSP depuis `IdeaProject` — publiée
+     *  AVANT [SyncResult] : « Synchronisé » ne s'affiche qu'après. */
+    CLASSPATHS,
 }
 
 /** Liste les tâches d'un projet (sélecteur « Exécuter »). */
@@ -426,6 +501,9 @@ public data class ClasspathRequest(
     override val id: String,
     override val protocolVersion: Int,
     public val projectDir: String,
+    /** Arguments Gradle de la résolution (v4 : `--offline` et arguments
+     *  réglés s'appliquent AUSSI au classpath). */
+    public val arguments: List<String> = emptyList(),
 ) : ToolingRequest
 
 /**

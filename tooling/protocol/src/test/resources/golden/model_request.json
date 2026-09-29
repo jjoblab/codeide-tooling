@@ -1,6 +1,1 @@
-{
-  "type": "model_request",
-  "id": "req-42",
-  "protocolVersion": 3,
-  "projectDir": "/projets/demo"
-}
+{"type":"model_request","id":"req-42","protocolVersion":4,"projectDir":"/projets/demo"}

@@ -1,54 +1,71 @@
 package jo.codeide.tooling.server
 
 import jo.codeide.tooling.protocol.GradleProtocol
-import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.SyncPhase
-import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
 import jo.codeide.tooling.protocol.SyncStarted
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import org.gradle.tooling.model.GradleProject
-import org.gradle.tooling.model.idea.IdeaProject
+import org.gradle.tooling.events.OperationType
 import java.io.File
 
 /**
- * Synchronisation de projet (§5.3 — Resilient Sync) : résout les modèles
- * de la Tooling API UN PAR UN — `GradleProject` (tâches) puis `IdeaProject`
- * (structure IDE) — et livre ce qui a été résolu même si l'autre échoue :
- * [PartialSyncResult] plutôt qu'un échec sec.
+ * Synchronisation de projet (v4 — §3.1 du prompt « tooling professionnel ») :
+ * les phases annoncées sont RÉELLES et le déroulé ne ment plus.
  *
- * Chaque modèle est résolu dans sa propre garde : l'échec de l'un
- * n'entraîne pas celui de l'autre (c'est la sémantique « résiliente »
- * demandée par le prompt ; elle est stable dans la Tooling API puisque
- * chaque `model().get()` est un appel indépendant).
+ * - **OUTILS** : vérifications locales (dossier, wrapper, distribution en
+ *   cache) AVANT toute requête ;
+ * - **DISTRIBUTION** : le téléchargement/décompression de la distribution
+ *   a SA phase — l'ancienne CONNEXION prétendait la couvrir alors que
+ *   `connect()` ne télécharge rien ; les octets reçus viennent du sondeur
+ *   des fichiers `.part` (la Tooling API ne donne AUCUN octet pour la
+ *   distribution — vérifié sur le JAR 9.7.1) ;
+ * - **DAEMON** : démarrage du daemon, conclu au premier événement de
+ *   configuration (ou à la fin) ;
+ * - **CONFIGURATION** : événements `PROJECT_CONFIGURATION` de la Tooling
+ *   API, un par projet (compteur n) ;
+ * - **MODELE_TACHES puis MODELE_IDE** : l'action UNIQUE résout les DEUX
+ *   modèles dans UNE requête (l'ancienne double suite de `model().get()`
+ *   configurait le build deux fois) — les transitions streament par
+ *   `BuildController.send` vers le `StreamedValueListener` ;
+ * - **DEPENDANCES** : événements `FILE_DOWNLOAD` (artefact, octets reçus
+ *   cumulés, compteur n) — n'arrive que si des téléchargements ont LIEU ;
+ * - **CLASSPATHS** : les classpaths LSP extraits de `IdeaProject`, publiés
+ *   AVANT [SyncResult] — « Synchronisé » ne s'affiche qu'après.
  *
- * v3 (progression de sync) : chaque phase est annoncée AU bus par
- * [SyncProgress] — départ puis durée — entre [SyncStarted] et le résultat :
- * l'app affiche « connexion au daemon Gradle… », « résolution du modèle… »
- * au lieu d'un « en cours » muet pendant des dizaines de secondes (la
- * première connexion d'un projet télécharge la distribution Gradle et
- * démarre son daemon). Les phases voyagent ÉNUMÉRÉES : les libellés
- * appartiennent au client, jamais au serveur.
+ * Les arguments réglés (`--offline`, arguments libres) s'appliquent à la
+ * requête (v4) : la sync cesse de les ignorer. Le résultat de l'action
+ * alimente le [CacheSync] (listage et classpath répondent sans re-résoudre).
+ *
+ * Écoute des events : [EcouteurProgressionCommun] (FILE_DOWNLOAD +
+ * PROJECT_CONFIGURATION, débit borné) et l'écouteur HISTORIQUE de statut
+ * (descriptions textuelles de la distribution/du daemon — l'unique
+ * signal TAPI pendant la résolution de la distribution).
  */
 internal class SyncHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
+    private val cache: CacheSync = CacheSync(),
 ) {
     /**
      * Résout les modèles du projet et publie [SyncStarted], les phases
-     * ([SyncProgress]) puis [SyncResult] ou [PartialSyncResult].
+     * réelles puis [SyncResult] ou [PartialSyncResult].
      */
     suspend fun synchroniser(requete: SyncRequest) {
         val debut = System.currentTimeMillis()
         val dossier = File(requete.projectDir)
+        val phases = ConteurPhasesSync(requete.projectDir, bus)
 
         // Départ annoncé AVANT toute résolution (étape 32, ADR 0057) :
-        // symétrique du BuildStarted des builds — l'app rend son état
-        // sur un événement DU serveur, pas sur la présomption de son
-        // propre geste (une sync peut aussi partir d'un autre point
-        // d'entrée demain).
+        // symétrique du BuildStarted des builds — l'app rend son état sur
+        // un événement DU serveur, pas sur la présomption de son propre geste.
         bus.publier(
             SyncStarted(
                 id = requete.id,
@@ -57,146 +74,243 @@ internal class SyncHandler(
             ),
         )
 
-        // Connexion hoistée AVANT les modèles (v3) : elle porte sa PROPRE
-        // phase — la plus longue d'une première sync (distribution +
-        // daemon) mérite son affichage, et son échec sec évite deux
-        // « modèles non résolus » qui disent tout sauf la cause.
-        val enCours = EnCoursSync(requete = requete)
+        // ---- OUTILS : vérifications locales (rapides, sans requête) -----
+        val urlWrapper =
+            mesurerLocale(phases) {
+                if (!dossier.isDirectory) {
+                    error("répertoire introuvable : ${requete.projectDir}")
+                }
+                EtatsDistribution.lireUrlWrapper(dossier)
+            }
+
+        // ---- Connexion (sans phase : connect() ne télécharge rien —
+        // v4 corrige le mensonge de l'ancienne phase CONNEXION). ----------
         val connexion =
             try {
-                mesurerPhase(requete, SyncPhase.CONNEXION) { pool.connexion(dossier) }
+                withContext(Dispatchers.IO) { pool.connexion(dossier) }
             } catch (t: Throwable) {
                 Journal.warn("connexion Gradle impossible : ${t.message}")
-                bus.publier(
-                    SyncResult(
-                        id = requete.id,
-                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                        projectDir = requete.projectDir,
-                        succeeded = false,
-                        durationMs = System.currentTimeMillis() - debut,
-                        failureMessage = "connexion Gradle impossible : ${t.message}",
-                    ),
-                )
+                phases.conclureTout()
+                publierEchecSec(requete, debut, "connexion Gradle impossible : ${t.message}")
                 return
             }
 
-        resoudre(enCours, "gradle-project", SyncPhase.MODELE_GRADLE) {
-            connexion.model(GradleProject::class.java).get()
+        // ---- DISTRIBUTION : installée (conclue aussitôt) ou à résoudre
+        // (sondée pendant l'action — la Tooling API y télécharge la
+        // distribution paresseusement). -----------------------------------
+        val distributionInstallee = EtatsDistribution.estInstallee(urlWrapper)
+        phases.ouvrir(SyncPhase.DISTRIBUTION, element = urlWrapper?.substringAfterLast('/'))
+        if (distributionInstallee) {
+            phases.conclure(SyncPhase.DISTRIBUTION)
         }
-        resoudre(enCours, "idea-project", SyncPhase.MODELE_IDEA) {
-            connexion.model(IdeaProject::class.java).get()
-        }
-        publierIssue(enCours, System.currentTimeMillis() - debut)
+
+        // ---- DAEMON : ouvert avant l'action, conclu au premier événement
+        // de configuration de projet (ou à la fin de l'action). -----------
+        phases.ouvrir(SyncPhase.DAEMON)
+
+        // ---- L'action unique (modèles + classpaths + options). ----------
+        val resultat =
+            try {
+                coroutineScope {
+                    val sondeur = lancerSondeurDistribution(phases, urlWrapper)
+                    try {
+                        executerAction(requete, phases, connexion)
+                    } finally {
+                        sondeur.cancel()
+                    }
+                }
+            } catch (t: Throwable) {
+                Journal.warn("action de sync échouée : ${t.message}")
+                phases.conclureTout()
+                publierEchecSec(requete, debut, "synchronisation échouée : ${t.message}")
+                return
+            }
+
+        // ---- Conclusion : classpaths puis résultat (§3.2 — « Synchronisé »
+        // n'apparaît qu'après la dernière phase). -------------------------
+        conclureAvecSucces(requete, phases, resultat, debut)
     }
 
-    /** Accumulateurs d'une sync en cours (modèles résolus/échoués). */
-    private class EnCoursSync(
-        val requete: SyncRequest,
-        val resolus: MutableList<String> = mutableListOf(),
-        val echoues: MutableList<String> = mutableListOf(),
-    )
-
-    /**
-     * Résout un modèle isolé : sa phase est annoncée au bus (départ puis
-     * durée), son échec est constaté, jamais propagé.
-     */
-    private suspend fun resoudre(
-        enCours: EnCoursSync,
-        nom: String,
-        phase: SyncPhase,
-        resolution: suspend () -> Unit,
-    ) {
-        try {
-            mesurerPhase(enCours.requete, phase) {
-                withContext(Dispatchers.IO) { resolution() }
-            }
-            enCours.resolus += nom
-        } catch (t: Throwable) {
-            Journal.warn("modèle $nom non résolu : ${t.message}")
-            enCours.echoues += nom
-        }
-    }
-
-    /** Publie l'issue de la sync : réussie, partielle ou échec sec. */
-    private fun publierIssue(
-        enCours: EnCoursSync,
-        dureeMs: Long,
-    ) {
-        val requete = enCours.requete
-        when {
-            enCours.resolus.isEmpty() -> {
-                bus.publier(
-                    SyncResult(
-                        id = requete.id,
-                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                        projectDir = requete.projectDir,
-                        succeeded = false,
-                        durationMs = dureeMs,
-                        failureMessage = "aucun modèle résolu (${enCours.echoues.joinToString()})",
-                    ),
-                )
-            }
-
-            enCours.echoues.isEmpty() -> {
-                bus.publier(
-                    SyncResult(
-                        id = requete.id,
-                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                        projectDir = requete.projectDir,
-                        succeeded = true,
-                        durationMs = dureeMs,
-                    ),
-                )
-            }
-
-            else -> {
-                bus.publier(
-                    PartialSyncResult(
-                        id = requete.id,
-                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                        projectDir = requete.projectDir,
-                        resolvedModels = enCours.resolus.toList(),
-                        failedModels = enCours.echoues.toList(),
-                    ),
-                )
-            }
-        }
-    }
-
-    /**
-     * Exécute [bloc] entre les deux annonces de sa phase (v3) : départ
-     * (`terminee = false`) puis retour avec durée (`terminee = true`) —
-     * l'horloge est celle du serveur, la même que [SyncResult.durationMs].
-     */
-    private suspend fun <T> mesurerPhase(
+    /** Sortie d'échec sec — les phases pendantes sont closes par l'appelant. */
+    private fun publierEchecSec(
         requete: SyncRequest,
-        phase: SyncPhase,
-        bloc: suspend () -> T,
+        debut: Long,
+        message: String,
+    ) {
+        bus.publier(
+            SyncResult(
+                id = requete.id,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = requete.projectDir,
+                succeeded = false,
+                durationMs = System.currentTimeMillis() - debut,
+                failureMessage = message,
+            ),
+        )
+    }
+
+    /** Conclusion : CLASSPATHS avant le résultat, cache déposé, phases
+     *  pendantes closes — « Synchronisé » n'apparaît qu'après la dernière
+     *  phase (§3.2). */
+    private fun conclureAvecSucces(
+        requete: SyncRequest,
+        phases: ConteurPhasesSync,
+        resultat: ResultatModelesSync,
+        debut: Long,
+    ) {
+        phases.ouvrir(SyncPhase.CLASSPATHS)
+        phases.conclure(SyncPhase.CLASSPATHS, compteur = resultat.modules.size)
+
+        // Le cache alimente listage et classpath (v4) : une seule
+        // résolution, tout le monde en profite.
+        cache.deposer(requete.projectDir, resultat.taches, resultat.modules)
+
+        phases.conclureTout()
+        bus.publier(
+            SyncResult(
+                id = requete.id,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = requete.projectDir,
+                succeeded = true,
+                durationMs = System.currentTimeMillis() - debut,
+            ),
+        )
+    }
+
+    /**
+     * Exécute l'action unique : arguments réglés, écouteurs communs
+     * (téléchargements + configuration), marqueurs de phases streamés,
+     * exécution bloquante sur E/S sous le délai du dispatcher.
+     */
+    private suspend fun executerAction(
+        requete: SyncRequest,
+        phases: ConteurPhasesSync,
+        connexion: org.gradle.tooling.ProjectConnection,
+    ): ResultatModelesSync {
+        val daemonConclu =
+            java.util.concurrent.atomic
+                .AtomicBoolean(false)
+        val ecouteur =
+            EcouteurProgressionCommun(
+                surTelechargement = { detail -> phases.surTelechargement(detail) },
+                surConfiguration = { element, terminee, compteur ->
+                    // Le premier événement de configuration prouve que le
+                    // daemon tourne et configure : DAEMON se conclut là.
+                    if (daemonConclu.compareAndSet(false, true)) {
+                        phases.conclure(SyncPhase.DAEMON)
+                    }
+                    phases.surConfiguration(element, terminee, compteur)
+                },
+            )
+        val ecouteurStatut = EcouteurStatutLegacy(phases)
+
+        return withContext(Dispatchers.IO) {
+            val executer =
+                connexion
+                    .action(ActionSyncModeles())
+                    .withArguments(requete.arguments)
+                    .addProgressListener(
+                        ecouteur,
+                        OperationType.FILE_DOWNLOAD,
+                        OperationType.PROJECT_CONFIGURATION,
+                    ).addProgressListener(ecouteurStatut)
+            // Les marqueurs de phases streamés (vérifié sur le JAR 9.7.1 :
+            // `setStreamedValueListener` retourne void, il ne s'enchaîne
+            // PAS — posé avant `run`, les valeurs arrivent pendant).
+            executer.setStreamedValueListener { valeur ->
+                when (valeur as? MarqueurPhaseModele) {
+                    MarqueurPhaseModele.MODELE_TACHES -> {
+                        phases.ouvrir(SyncPhase.MODELE_TACHES)
+                    }
+
+                    MarqueurPhaseModele.MODELE_IDE -> {
+                        phases.conclure(SyncPhase.MODELE_TACHES)
+                        phases.ouvrir(SyncPhase.MODELE_IDE)
+                    }
+
+                    null -> {
+                        Unit
+                    }
+                }
+            }
+            executer.run()
+        }
+    }
+
+    /**
+     * Sondeur de la distribution pendant l'action (500 ms) : octets reçus
+     * (fichiers `.part`), conclusion dès que le marqueur `.ok` apparaît.
+     * Inactif si la distribution était déjà installée (ou sans wrapper —
+     * la Tooling API résout sa propre distribution, rien à sonder).
+     */
+    private fun CoroutineScope.lancerSondeurDistribution(
+        phases: ConteurPhasesSync,
+        urlWrapper: String?,
+    ): Job =
+        launch {
+            if (urlWrapper == null || EtatsDistribution.estInstallee(urlWrapper)) return@launch
+            while (isActive) {
+                if (EtatsDistribution.estInstallee(urlWrapper)) {
+                    // Marqueur `.ok` : la distribution est résolue — le
+                    // daemon démarre derrière, la phase se conclut.
+                    phases.conclure(SyncPhase.DISTRIBUTION)
+                    return@launch
+                }
+                val octets = EtatsDistribution.octetsPartiels()
+                if (octets > 0) {
+                    phases.progression(
+                        SyncPhase.DISTRIBUTION,
+                        element = urlWrapper.substringAfterLast('/'),
+                        octetsRecus = octets,
+                    )
+                }
+                delay(PERIODE_SONDAGE_DISTRIBUTION_MS)
+            }
+        }
+
+    /** Exécute [bloc] dans la phase OUTILS (départ + conclusion, rapide). */
+    private fun <T> mesurerLocale(
+        phases: ConteurPhasesSync,
+        bloc: () -> T,
     ): T {
-        publierPhase(requete, phase, terminee = false, dureeMs = 0)
-        val debut = System.currentTimeMillis()
+        phases.ouvrir(SyncPhase.OUTILS)
         try {
             return bloc()
         } finally {
-            publierPhase(requete, phase, terminee = true, dureeMs = System.currentTimeMillis() - debut)
+            phases.conclure(SyncPhase.OUTILS)
         }
     }
 
-    private fun publierPhase(
-        requete: SyncRequest,
-        phase: SyncPhase,
-        terminee: Boolean,
-        dureeMs: Long,
-    ) {
-        bus.publier(
-            SyncProgress(
-                id = nouvelId(),
-                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                projectDir = requete.projectDir,
-                phase = phase,
-                terminee = terminee,
-                dureeMs = dureeMs,
-            ),
-        )
+    private companion object {
+        /** Période du sondeur de distribution (ms). */
+        const val PERIODE_SONDAGE_DISTRIBUTION_MS = 500L
+    }
+}
+
+/**
+ * Écouteur HISTORIQUE de la Tooling API (v4, §3.1 : « l'écouteur
+ * historique pour le téléchargement de la distribution ») : les statuts
+ * textuels (`statusChanged`/`ProgressEvent.getDescription`) sont le SEUL
+ * signal pendant la résolution de la distribution (« Downloading… »,
+ * « Unzipping… ») — ils nourrissent l'élément courant de la phase
+ * DISTRIBUTION, sans jamais traverser le bus en flot continu.
+ */
+internal class EcouteurStatutLegacy(
+    private val phases: ConteurPhasesSync,
+) : org.gradle.tooling.ProgressListener {
+    private var dernierStatutMs = 0L
+
+    override fun statusChanged(evenement: org.gradle.tooling.ProgressEvent) {
+        val maintenant = System.currentTimeMillis()
+        if (maintenant - dernierStatutMs < PERIODE_MINIMALE_MS) return
+        dernierStatutMs = maintenant
+        val description = evenement.description
+        if (description.isBlank()) return
+        phases.progression(SyncPhase.DISTRIBUTION, element = description)
+    }
+
+    private companion object {
+        /** Borne de débit des statuts textuels (5/s — exigence §3.1). */
+        const val PERIODE_MINIMALE_MS = 200L
     }
 }
