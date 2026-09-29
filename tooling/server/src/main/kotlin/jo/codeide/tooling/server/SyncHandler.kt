@@ -23,10 +23,11 @@ import java.io.File
  * - **OUTILS** : vérifications locales (dossier, wrapper, distribution en
  *   cache) AVANT toute requête ;
  * - **DISTRIBUTION** : le téléchargement/décompression de la distribution
- *   a SA phase — l'ancienne CONNEXION prétendait la couvrir alors que
- *   `connect()` ne télécharge rien ; les octets reçus viennent du sondeur
- *   des fichiers `.part` (la Tooling API ne donne AUCUN octet pour la
- *   distribution — vérifié sur le JAR 9.7.1) ;
+ *   a SA phase — mais elle ne se DÉROULE que si la distribution MANQUE
+ *   (v5, aperçu : déjà en cache → phase SAUTÉE, la console rend « en
+ *   cache » et n'affiche un téléchargement que s'il a lieu) ; les octets
+ *   reçus viennent du sondeur des fichiers `.part` (la Tooling API ne
+ *   donne AUCUN octet pour la distribution — vérifié sur le JAR 9.7.1) ;
  * - **DAEMON** : démarrage du daemon, conclu au premier événement de
  *   configuration (ou à la fin) ;
  * - **CONFIGURATION** : événements `PROJECT_CONFIGURATION` de la Tooling
@@ -95,13 +96,15 @@ internal class SyncHandler(
                 return
             }
 
-        // ---- DISTRIBUTION : installée (conclue aussitôt) ou à résoudre
-        // (sondée pendant l'action — la Tooling API y télécharge la
-        // distribution paresseusement). -----------------------------------
-        val distributionInstallee = EtatsDistribution.estInstallee(urlWrapper)
-        phases.ouvrir(SyncPhase.DISTRIBUTION, element = urlWrapper?.substringAfterLast('/'))
-        if (distributionInstallee) {
-            phases.conclure(SyncPhase.DISTRIBUTION)
+        // ---- DISTRIBUTION (v5, aperçu) : SAUTÉE honnêtement quand elle
+        // est déjà en cache (la rangée du client porte « en cache », aucun
+        // « ✓ 0 s » d'un travail qui n'a pas eu lieu) ; ouverte et sondée
+        // pendant l'action quand elle MANQUE — la Tooling API y télécharge
+        // la distribution paresseusement. -------------------------------
+        if (EtatsDistribution.estInstallee(urlWrapper)) {
+            phases.sauter(SyncPhase.DISTRIBUTION, element = urlWrapper?.substringAfterLast('/'))
+        } else {
+            phases.ouvrir(SyncPhase.DISTRIBUTION, element = urlWrapper?.substringAfterLast('/'))
         }
 
         // ---- DAEMON : ouvert avant l'action, conclu au premier événement

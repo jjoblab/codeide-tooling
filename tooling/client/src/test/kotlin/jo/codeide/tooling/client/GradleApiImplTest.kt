@@ -522,6 +522,35 @@ class GradleApiImplTest {
         }
 
     @Test
+    fun `une phase SAUTEE en cache traverse avec son drapeau - v5`() =
+        runBlocking {
+            val session = SessionFactice()
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+
+            session.emettre(
+                SyncProgress(
+                    nouvelId(),
+                    protocole,
+                    "/p",
+                    SyncPhase.DISTRIBUTION,
+                    terminee = true,
+                    sautee = true,
+                    element = "gradle-9.7.1-bin.zip",
+                ),
+            )
+
+            val etape =
+                withTimeout(5_000) {
+                    api.observeSyncProgress().first()
+                }
+            assertEquals(EtapeSync.DISTRIBUTION, etape.etape)
+            assertTrue("sautée : le client rend la rangée « en cache »", etape.sautee)
+            assertTrue(etape.terminee)
+            assertEquals("gradle-9.7.1-bin.zip", etape.element)
+        }
+
+    @Test
     fun `les arguments du build voyagent avec la requete - v3`() =
         runBlocking {
             val session = SessionFactice()

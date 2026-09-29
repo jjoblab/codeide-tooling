@@ -333,6 +333,11 @@ public data class PartialSyncResult(
  * la console — un téléchargement se VOIT, une phase ne reste muette que
  * si Gradle lui-même est muet. Champs à défaut : un décodeur v3 ignore
  * les inconnus, un émetteur v4 les omet quand l'information manque.
+ *
+ * v5 : [sautee] marque une phase SATISFAITE D'AVANCE — la distribution
+ * déjà en cache n'est ni téléchargée ni annoncée comme un travail fait
+ * (« ✓ 0 s » mensonger) : l'arbre du client la rend en « en cache », le
+ * téléchargement n'apparaît que s'il a LIEU.
  */
 @Serializable
 @SerialName("sync_progress")
@@ -353,6 +358,10 @@ public data class SyncProgress(
     public val compteur: Int? = null,
     /** Total d'éléments de la phase (N) si CONNU — `null` sinon. */
     public val total: Int? = null,
+    /** `true` pour une phase SATISFAITE D'AVANCE (v5 — distribution déjà
+     *  en cache) : aucun travail n'a eu lieu, la durée reste 0 et l'arbre
+     *  du client affiche « en cache » au lieu d'un achèvement. */
+    public val sautee: Boolean = false,
 ) : ToolingEvent
 
 /**

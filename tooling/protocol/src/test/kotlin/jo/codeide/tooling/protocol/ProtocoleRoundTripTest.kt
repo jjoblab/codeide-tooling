@@ -7,6 +7,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -103,6 +104,24 @@ class ProtocoleRoundTripTest {
 
         val decode = ProtocolJson.decoderRequete(enrichi.toString())
         assertEquals(echantillons["build_request"], decode)
+    }
+
+    @Test
+    fun `une phase SAUTEE en cache traverse le cable - v5`() {
+        val sautee =
+            SyncProgress(
+                "evt-77",
+                GradleProtocol.PROTOCOL_VERSION,
+                projectDir = "/projets/demo",
+                phase = SyncPhase.DISTRIBUTION,
+                terminee = true,
+                sautee = true,
+                element = "gradle-9.7.1-bin.zip",
+            )
+        val relue = ProtocolJson.decoderEvenement(ProtocolJson.encoder(sautee)) as SyncProgress
+        assertEquals(sautee, relue)
+        assertTrue("le drapeau sautée survit au câble", relue.sautee)
+        assertEquals(0L, relue.dureeMs)
     }
 
     @Test

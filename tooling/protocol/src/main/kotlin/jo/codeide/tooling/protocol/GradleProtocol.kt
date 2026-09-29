@@ -25,8 +25,13 @@ public object GradleProtocol {
      * l'égalité EXACTE des deux côtés : un orchestrateur v4 qui parlerait à
      * une app v3 est refusé avec un message clair au lieu d'échouer au
      * décodage d'un événement inconnu.
+     *
+     * v5 (aperçu du tooling) : [SyncProgress.sautee] — une phase satisfaite
+     * d'avance (distribution Gradle déjà en cache) se déclare SAUTÉE et non
+     * achevée : la console n'affiche un téléchargement que s'il a LIEU, la
+     * rangée porte « en cache ».
      */
-    public const val PROTOCOL_VERSION: Int = 4
+    public const val PROTOCOL_VERSION: Int = 5
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"

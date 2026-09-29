@@ -1,1 +1,1 @@
-{"type":"diagnostic","id":"evt-43","protocolVersion":4,"severity":"error","file":"/projets/demo/src/Main.kt","line":12,"column":5,"message":"Unresolved reference: truc","source":"kotlinc"}
+{"type":"diagnostic","id":"evt-43","protocolVersion":5,"severity":"error","file":"/projets/demo/src/Main.kt","line":12,"column":5,"message":"Unresolved reference: truc","source":"kotlinc"}

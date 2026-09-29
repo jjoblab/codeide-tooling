@@ -338,6 +338,7 @@ class GradleApiImpl
                     element = evenement.element,
                     compteur = evenement.compteur,
                     total = evenement.total,
+                    sautee = evenement.sautee,
                 ),
             )
         }

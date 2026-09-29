@@ -10,7 +10,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * Machine à états des phases RÉELLES d'une sync v4 (§3.1) : chaque phase
  * est annoncée au départ puis conclue avec sa durée MESURÉE ; les phases
  * longues reçoivent des PROGRESSIONS (octets reçus, élément courant,
- * compteur n/N) entre les deux.
+ * compteur n/N) entre les deux. v5 : une phase satisfaite d'avance se
+ * déclare SAUTÉE ([sauter]) — la distribution en cache n'est ni
+ * téléchargée ni conclue « ✓ 0 s ».
  *
  * Thread-safe : les événements Tooling API arrivent sur les fils internes
  * de Gradle, le sondeur de distribution sur sa coroutine, la conclusion
@@ -27,6 +29,9 @@ internal class ConteurPhasesSync(
 
     /** Phases ouvertes (départ annoncé) → instant d'ouverture. */
     private val ouvertes = LinkedHashMap<SyncPhase, Long>()
+
+    /** Phases déjà déclarées sautées (anti double publication). */
+    private val sautees = mutableSetOf<SyncPhase>()
 
     /** Octets reçus cumulés des dépendances TERMINÉES. */
     private var octetsDependances = 0L
@@ -95,6 +100,26 @@ internal class ConteurPhasesSync(
         }
     }
 
+    /** Déclare une phase SAUTÉE (v5 — satisfaite d'avance, aucun travail) :
+     *  la distribution Gradle déjà en cache n'est ni téléchargée ni conclue
+     *  par un « ✓ 0 s » mensonger — le client rend la rangée « en cache ».
+     *  Publiée UNE fois ; une phase déjà ouverte ne peut plus l'être. */
+    fun sauter(
+        phase: SyncPhase,
+        element: String? = null,
+    ) {
+        synchronized(verrou) {
+            if (ouvertes.containsKey(phase) || !sautees.add(phase)) return
+            publier(
+                phase,
+                terminee = true,
+                dureeMs = 0,
+                Details(element = element),
+                sautee = true,
+            )
+        }
+    }
+
     /** Un téléchargement de dépendance traverse (fin = octets comptés) :
      *  alimente la phase DEPENDANCES — cumul, élément récent, compteur n. */
     fun surTelechargement(detail: DetailTelechargement) {
@@ -156,6 +181,7 @@ internal class ConteurPhasesSync(
         terminee: Boolean,
         dureeMs: Long,
         details: Details = Details(),
+        sautee: Boolean = false,
     ) {
         bus.publier(
             SyncProgress(
@@ -169,6 +195,7 @@ internal class ConteurPhasesSync(
                 octetsTotal = details.octetsTotal,
                 element = details.element,
                 compteur = details.compteur,
+                sautee = sautee,
             ),
         )
     }
