@@ -326,6 +326,8 @@ class GradleApiImpl
         private suspend fun pomperEtapeSync(evenement: SyncProgress) {
             // v4 (§3.1) : une étape (même une progression d'octet) est un
             // signe de vie — un téléchargement qui progresse ne meurt pas.
+            // v6 (prompt de suivi §2) : plus de champ `sautee` — une phase
+            // qui n'a pas lieu n'est pas émise par le serveur.
             derniereActiviteSyncMs.set(System.currentTimeMillis())
             progressionSync.send(
                 EtapeSyncTooling(
@@ -338,7 +340,6 @@ class GradleApiImpl
                     element = evenement.element,
                     compteur = evenement.compteur,
                     total = evenement.total,
-                    sautee = evenement.sautee,
                 ),
             )
         }

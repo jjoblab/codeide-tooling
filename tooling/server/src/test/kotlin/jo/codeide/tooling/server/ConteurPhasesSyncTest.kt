@@ -150,44 +150,10 @@ class ConteurPhasesSyncTest {
         assertEquals(ids.size, ids.distinct().size)
     }
 
-    // ---- Phase SAUTÉE (v5 — distribution déjà en cache) ------------------
-
-    @Test
-    fun `une phase sautee se publie conclue sans duree, une seule fois`() {
-        conteur.sauter(SyncPhase.DISTRIBUTION, element = "gradle-9.7.1-bin.zip")
-        conteur.sauter(SyncPhase.DISTRIBUTION) // idempotente : publiée une fois
-
-        assertEquals(1, progressions.size)
-        val sautee = progressions.single()
-        assertEquals(SyncPhase.DISTRIBUTION, sautee.phase)
-        assertTrue("conclue sans travail", sautee.terminee)
-        assertTrue("marquée sautée — le client rend « en cache »", sautee.sautee)
-        assertEquals("aucune durée : aucun travail n'a eu lieu", 0L, sautee.dureeMs)
-        assertEquals("gradle-9.7.1-bin.zip", sautee.element)
-    }
-
-    @Test
-    fun `une phase ouverte ne peut plus etre sautee - le travail a eu lieu`() {
-        conteur.ouvrir(SyncPhase.DISTRIBUTION, element = "gradle-9.7.1-bin.zip")
-        conteur.sauter(SyncPhase.DISTRIBUTION) // ignorée : la phase est ouverte
-
-        assertEquals(1, progressions.size)
-        assertFalse("le départ annoncé reste la vérité", progressions.single().sautee)
-
-        // La conclusion normale garde la main (durée mesurée, pas « en cache »).
-        conteur.conclure(SyncPhase.DISTRIBUTION)
-        val terminee = progressions.filter { it.terminee }.single()
-        assertFalse(terminee.sautee)
-    }
-
-    @Test
-    fun `une phase sautee ne se re-conclut pas par conclureTout`() {
-        conteur.sauter(SyncPhase.DISTRIBUTION)
-        conteur.ouvrir(SyncPhase.DAEMON)
-        conteur.conclureTout()
-
-        // DISTRIBUTION : publiée UNE fois (sautée), jamais re-conclue.
-        assertEquals(1, progressions.count { it.phase == SyncPhase.DISTRIBUTION })
-        assertTrue(progressions.filter { it.phase == SyncPhase.DISTRIBUTION }.single().sautee)
-    }
+    // v6 (prompt de suivi §2) : les tests `une phase sautee se publie
+    // conclue sans duree`, `une phase ouverte ne peut plus etre sautee` et
+    // `une phase sautee ne se re-conclut pas par conclureTout` sont
+    // SUPPRIMÉS — le drapeau `sautee` et la méthode `sauter()` n'existent
+    // plus. Une phase qui n'a pas lieu (distribution en cache) n'est plus
+    // émise du tout par le serveur.
 }
