@@ -930,7 +930,8 @@ class GradleApiImpl
                 source = source,
             )
 
-        /** Traduit un classpath du protocole vers le domaine (ADR 0058). */
+        /** Traduit un classpath du protocole vers le domaine (ADR 0058).
+         *  v0.40.1 (prompt de suivi §4) : propage les statistiques par module. */
         private fun ClasspathResult.versClasspathDomaine(): ClasspathProjet =
             ClasspathProjet(
                 projectDir = projectDir,
@@ -954,6 +955,16 @@ class GradleApiImpl
                                         sources = entree.sources,
                                     )
                                 },
+                            nbJars = module.nbJars,
+                            nbAars = module.nbAars,
+                            nbSources = module.nbSources,
+                            varianteAndroid = module.varianteAndroid,
+                            nbDependancesProjet = module.nbDependancesProjet,
+                            fichiersGeneres = module.fichiersGeneres,
+                            androidJar = module.androidJar,
+                            ignore = module.ignore,
+                            raisonIgnore = module.raisonIgnore,
+                            avertissements = module.avertissements,
                         )
                     },
             )

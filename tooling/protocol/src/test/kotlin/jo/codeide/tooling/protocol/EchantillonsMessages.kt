@@ -162,6 +162,13 @@ internal object EchantillonsMessages {
                                         scope = "compile",
                                     ),
                                 ),
+                            // v0.40.1 (prompt de suivi §4) : statistiques par
+                            // module pré-calculées côté serveur.
+                            nbJars = 1,
+                            nbAars = 1,
+                            nbSources = 1,
+                            varianteAndroid = "debug",
+                            nbDependancesProjet = 1,
                         ),
                     ),
             ),

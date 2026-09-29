@@ -563,9 +563,39 @@ public data class ClasspathEntry(
  * et ses tests) et entrées compilées — assez pour qu'un LSP compile,
  * complète et navigue.
  *
+ * v0.40.1 (prompt de suivi §4) : statistiques pré-calculées par module
+ * pour l'affichage des sous-lignes « :app · 312 jars · 4 sources ·
+ * variante debug ». Les champs sont optionnels (compatibilité ascendante
+ * — un serveur ancien ne les envoie pas, un client nouveau les affiche
+ * pas ; un serveur nouveau les envoie, un client ancien les ignore via
+ * `ignoreUnknownKeys`).
+ *
  * @property name nom du module Gradle (ex. `:app`).
  * @property sourceDirs répertoires sources absolus.
  * @property entries entrées du classpath compilé.
+ * @property nbJars nombre de JARs résolus (v0.40.1 §4) — `null` si non
+ *           calculé par le serveur.
+ * @property nbAars nombre d'AARs résolus (v0.40.1 §4) — `null` si non
+ *           calculé.
+ * @property nbSources nombre de répertoires sources (v0.40.1 §4) —
+ *           `null` si non calculé.
+ * @property varianteAndroid variante Android retenue (ex. `debug`,
+ *           `release`) — `null` pour un module non-Android ou non
+ *           déterminable.
+ * @property nbDependancesProjet nombre de dépendances vers des modules
+ *           frères (v0.40.1 §4) — `null` si non calculé.
+ * @property fichiersGeneres fichiers générés trouvés (R, BuildConfig,
+ *           KSP/kapt — v0.40.1 §4) — `null` si non calculé ; vide si
+ *           aucun.
+ * @property androidJar chemin vers `android.jar` (compileSdk, v0.40.1
+ *           §4) — `null` pour un module non-Android.
+ * @property ignore `true` si le module est ignoré par CodeIDE (v0.40.1
+ *           §4) — par défaut `false`.
+ * @property raisonIgnore raison de l'ignorance (v0.40.1 §4) — `null` si
+ *           non ignoré.
+ * @property avertissements avertissements sur ce module (dépendance non
+ *           résolue, AAR non extrait — v0.40.1 §4) — `null` si non
+ *           calculé ; vide si aucun.
  */
 @Serializable
 @SerialName("classpath_module")
@@ -573,6 +603,16 @@ public data class ClasspathModule(
     public val name: String,
     public val sourceDirs: List<String>,
     public val entries: List<ClasspathEntry>,
+    public val nbJars: Int? = null,
+    public val nbAars: Int? = null,
+    public val nbSources: Int? = null,
+    public val varianteAndroid: String? = null,
+    public val nbDependancesProjet: Int? = null,
+    public val fichiersGeneres: List<String>? = null,
+    public val androidJar: String? = null,
+    public val ignore: Boolean = false,
+    public val raisonIgnore: String? = null,
+    public val avertissements: List<String>? = null,
 )
 
 /** Réponse de [ClasspathRequest] : classpath de chaque module du projet. */
