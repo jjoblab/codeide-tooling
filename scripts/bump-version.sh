@@ -63,7 +63,12 @@ date_du_jour=$(date +%F)
 # existante (la plus récente).
 marqueur="## [Non publié]"
 if [ -f CHANGELOG.md ] && ! grep -q "^## \[$nouvelle_version\]" CHANGELOG.md; then
-    if grep -qF "$marqueur" CHANGELOG.md; then
+    # NB : le grep est ANCRÉ (^) — le journal documente ses propres
+    # correctifs et cite le marqueur DANS LA PROSE (`s|^## [Non publié]|…|`)
+    # ; un grep non ancré (même -F) matche cette prose et détourne le
+    # script vers la branche « marqueur ouvert » (rien inséré, message de
+    # succès mensonger — découvert à la livraison 0.39.0).
+    if grep -q "^## \[Non publié\]" CHANGELOG.md; then
         # Marqueur [Non publié] déjà ouvert : le dater en place.
         sed -i "s|^## \[Non publié\]|## [$nouvelle_version] – $date_du_jour|" CHANGELOG.md
     elif grep -q "^## \[" CHANGELOG.md; then
