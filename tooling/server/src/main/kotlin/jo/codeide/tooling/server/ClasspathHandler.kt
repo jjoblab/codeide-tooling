@@ -75,7 +75,9 @@ internal class ClasspathHandler(
         )
     }
 
-    /** Traduit un module Idea en classpath LSP (sources + entrées). */
+    /** Traduit un module Idea en classpath LSP (sources + entrées) avec
+     *  statistiques pré-calculées par module (v0.40.1 §4). */
+    @Suppress("TooGenericExceptionCaught")
     private fun IdeaModule.versClasspath(): ClasspathModule {
         val sources =
             contentRoots.all
@@ -84,8 +86,9 @@ internal class ClasspathHandler(
                         racine.testDirectories.all.map { it.directory }
                 }.map { it.absolutePath }
                 .distinct()
+        val dependances = dependencies.all
         val entrees =
-            dependencies.all
+            dependances
                 .mapNotNull { dependance ->
                     when (dependance) {
                         is IdeaModuleDependency -> {
@@ -110,7 +113,74 @@ internal class ClasspathHandler(
                         }
                     }
                 }.distinct()
-        return ClasspathModule(name = name, sourceDirs = sources, entries = entrees)
+        // v0.40.1 (prompt de suivi §4) : statistiques par module pré-
+        // calculées côté serveur — l'UI les affiche en sous-lignes
+        // (« :app · 312 jars · 4 sources · variante debug ») sans
+        // re-parcourir les entries côté client.
+        val nbJars = entrees.count { it.kind == ClasspathKind.JAR }
+        val nbAars = entrees.count { it.kind == ClasspathKind.AAR }
+        val nbDependancesProjet = entrees.count { it.kind == ClasspathKind.MODULE }
+        // Tentative de détection de la variante Android : le nom du module
+        // peut contenir « debug » ou « release » quand c'est un variant
+        // spécifique, mais en général c'est la config Gradle (compileDebug
+        // Kotlin). On garde une heuristique conservatrice — `null` si non
+        // déterminé.
+        val varianteAndroid = detecterVarianteAndroid()
+        return ClasspathModule(
+            name = name,
+            sourceDirs = sources,
+            entries = entrees,
+            nbJars = nbJars,
+            nbAars = nbAars,
+            nbSources = sources.size,
+            varianteAndroid = varianteAndroid,
+            nbDependancesProjet = nbDependancesProjet,
+        )
+    }
+
+    /**
+     * Tente de détecter la variante Android courante d'un module (v0.40.1,
+     * prompt de suivi §4) — heuristique conservatrice : la Tooling API
+     * Gradle n'expose pas directement la variante retenue par défaut. On
+     * regarde les `contentRoots` (peut contenir `build/intermediates/
+     * <variant>/`) ou le nom du module (suffixe `Debug` / `Release`).
+     * Retourne `null` si non déterminé (module non-Android ou heuristique
+     * incertaine).
+     */
+    @Suppress("ReturnCount", "SwallowedException", "TooGenericExceptionCaught")
+    private fun IdeaModule.detecterVarianteAndroid(): String? {
+        // Le nom du module peut suffire pour des modules nommés
+        // `app-debug` ou `lib-release` — sinon, on regarde les
+        // contentRoots pour un chemin contenant `intermediates/<variant>/`.
+        val nomModule = name.lowercase()
+        when {
+            nomModule.endsWith("-debug") || nomModule.endsWith("debug") -> return "debug"
+            nomModule.endsWith("-release") || nomModule.endsWith("release") -> return "release"
+        }
+        // Cherche un chemin `intermediates/<variant>/` dans les content
+        // roots — c'est la signature d'un module Android compilé.
+        return try {
+            contentRoots.all
+                .firstNotNullOfOrNull { racine ->
+                    racine.sourceDirectories.all
+                        .firstOrNull {
+                            it.directory.absolutePath.contains("/intermediates/debug/") ||
+                                it.directory.absolutePath.contains("/intermediates/release/")
+                        }?.directory
+                        ?.absolutePath
+                }?.let { chemin ->
+                    when {
+                        chemin.contains("/intermediates/debug/") -> "debug"
+                        chemin.contains("/intermediates/release/") -> "release"
+                        else -> null
+                    }
+                }
+        } catch (e: Exception) {
+            // SwallowedException : le serveur n'a pas AppLogger (règle 14),
+            // retourner `null` est honnête — la variante reste non
+            // déterminée, l'UI n'affiche pas le champ variante.
+            null
+        }
     }
 
     /** Nature d'une entrée par son fichier (AAR, dossier de classes ou JAR). */
