@@ -19,6 +19,7 @@ import jo.codeide.core.domain.ResultatSynchronisation
 import jo.codeide.core.domain.SeveriteDiagnostic
 import jo.codeide.core.domain.StatutBuild
 import jo.codeide.core.domain.StatutTache
+import jo.codeide.core.domain.TelechargementBuild
 import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
@@ -148,6 +149,30 @@ class GradleApiImpl
         private val tachesParBuild = ConcurrentHashMap<String, Channel<EtatTacheBuild>>()
 
         /**
+         * Téléchargements par build — canal borné, envoi suspendant (v4,
+         * addendum §6) : mêmes garanties que les tâches ; alimenté par les
+         * `ProgressEvent` porteurs d'un détail de téléchargement.
+         */
+        private val telechargementsParBuild = ConcurrentHashMap<String, Channel<TelechargementBuild>>()
+
+        /**
+         * Dernier signe de vie de la sync (ms) — le délai d'INACTIVITÉ de
+         * [synchroniser] se réarme à chaque événement (v4 §3.1 : un
+         * téléchargement qui progresse ne meurt plus à 5 minutes).
+         */
+        private val derniereActiviteSyncMs =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+
+        /**
+         * Délai d'inactivité de la sync (v4 §3.1) — interne mutable : la
+         * production attend 90 s SANS événement, les tests le raccourcissent
+         * (même patron que les réglages pilotables).
+         */
+        @Volatile
+        internal var delaiInactiviteSyncMs: Long = DELAI_INACTIVITE_SYNC_MS
+
+        /**
          * Étapes de sync — canal borné, envoi suspendant (v3) : l'ordre
          * départ/fin de chaque phase est l'information, la conflation
          * mentirait. Unique pour le process : les syncs se succèdent, ne se
@@ -267,6 +292,9 @@ class GradleApiImpl
          * promesse, elle, attend toujours le résultat.
          */
         private fun pomperSync(evenement: ToolingEvent) {
+            // v4 (§3.1) : tout événement de sync est un signe de vie — le
+            // délai d'INACTIVITÉ de [synchroniser] se réarme ici.
+            derniereActiviteSyncMs.set(System.currentTimeMillis())
             when (evenement) {
                 is SyncStarted -> {
                     sync.value = EtatSyncTooling(enCours = true, projectDir = evenement.projectDir)
@@ -296,6 +324,9 @@ class GradleApiImpl
          * légitime d'un ÉTAT), les ÉTAPES ne se mélangent jamais.
          */
         private suspend fun pomperEtapeSync(evenement: SyncProgress) {
+            // v4 (§3.1) : une étape (même une progression d'octet) est un
+            // signe de vie — un téléchargement qui progresse ne meurt pas.
+            derniereActiviteSyncMs.set(System.currentTimeMillis())
             progressionSync.send(
                 EtapeSyncTooling(
                     projectDir = evenement.projectDir,
@@ -307,6 +338,27 @@ class GradleApiImpl
                     element = evenement.element,
                     compteur = evenement.compteur,
                     total = evenement.total,
+                ),
+            )
+        }
+
+        /**
+         * Un téléchargement du build traverse (v4, §6) : il part dans le
+         * canal des téléchargements — les ProgressEvent TEXTUELS (statut
+         * générique, sans détail) restent ignorés : rien à en faire
+         * aujourd'hui, la progression utile est structurée.
+         */
+        private suspend fun pomperTelechargement(evenement: ProgressEvent) {
+            val detail = evenement.telechargement ?: return
+            telechargementsParBuild[evenement.buildId]?.send(
+                TelechargementBuild(
+                    buildId = evenement.buildId,
+                    element = detail.element,
+                    octetsRecus = detail.octetsRecus,
+                    octetsTotal = detail.octetsTotal,
+                    termine = detail.termine,
+                    dureeMs = detail.dureeMs,
+                    compteur = detail.compteur,
                 ),
             )
         }
@@ -383,6 +435,13 @@ class GradleApiImpl
                     pomperEtapeSync(evenement)
                 }
 
+                // v4 (§6) — les téléchargements du build alimentent leur
+                // canal (arbre du build, « n / N ») ; les ProgressEvent
+                // textuels restent du statut générique (non affiché).
+                is ProgressEvent -> {
+                    pomperTelechargement(evenement)
+                }
+
                 is TasksResult -> {
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
@@ -425,14 +484,6 @@ class GradleApiImpl
                 is TaskFinished -> {
                     pomperTacheTerminee(evenement)
                 }
-
-                // Progression générique : toujours PERSONNE ne l'émet à ce
-                // jour (réservée aux types d'opérations que G5 jugera
-                // utiles — la progression de sync voyage par SyncProgress,
-                // structurée, depuis la v3).
-                is ProgressEvent -> {
-                    Unit
-                }
             }
         }
 
@@ -443,6 +494,9 @@ class GradleApiImpl
         override fun observeBuildOutput(buildId: String): Flow<LigneSortieBuild> = sortie(buildId).receiveAsFlow()
 
         override fun observeTachesBuild(buildId: String): Flow<EtatTacheBuild> = taches(buildId).receiveAsFlow()
+
+        override fun observeTelechargementsBuild(buildId: String): Flow<TelechargementBuild> =
+            telechargements(buildId).receiveAsFlow()
 
         override fun observeBuildState(buildId: String): Flow<EtatBuild> = etat(buildId).asStateFlow()
 
@@ -465,14 +519,13 @@ class GradleApiImpl
             arguments: List<String>,
         ): AppResult<ResultatSynchronisation> {
             val reponse =
-                echanger(
+                echangerAvecInactivite(
                     SyncRequest(
                         id = nouvelIdentifiant(),
                         protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                         projectDir = projectDir.canonicalPath,
                         arguments = arguments,
                     ),
-                    delaiMs = DELAI_SYNC_MS,
                 ) ?: return echecConnexion()
             return when (reponse) {
                 is SyncResult -> {
@@ -582,9 +635,11 @@ class GradleApiImpl
             // PENDANT le lancement (l'orchestrateur émet dès BuildStarted)
             // se tamponnent au lieu d'être perdus — la souscription après le
             // lancement ne manque rien (§5.2). Même tamponnement pour les
-            // TÂCHES (v3) : les TaskStarted précoces attendent le collecteur.
+            // TÂCHES (v3) et les TÉLÉCHARGEMENTS (v4 §6) : les événements
+            // précoces attendent le collecteur.
             sortie(buildId)
             taches(buildId)
+            telechargements(buildId)
             etat(buildId).value = EtatBuild(buildId = buildId, statut = StatutBuild.EN_COURS)
             val sessionCourante = session
             if (sessionCourante == null) {
@@ -642,7 +697,57 @@ class GradleApiImpl
         // ------------------------------------------------------------------
 
         /**
-         * Envoie une requête et attend SA réponse (promesse + délai).
+         * Échange À DÉLAI D'INACTIVITÉ (v4, §3.1) : contrairement à
+         * [echanger] (délai TOTAL), la fenêtre se RÉARMÉ à chaque signe de
+         * vie de la sync ([derniereActiviteSyncMs] — étapes, progressions,
+         * téléchargements d'octets) — une sync qui progresse reste vivante
+         * aussi longtemps qu'elle avance, seule la SILENCE la tue (un
+         * réseau mobile lent n'est plus un échec de 5 minutes).
+         *
+         * Exemption detekt ciblée (règle 16) : ReturnCount — clauses de
+         * garde (absence de session, échec d'envoi) retournant chacune une
+         * valeur typée ; SwallowedException — l'échec d'envoi est ATTENDU
+         * et traduit en échec de connexion par l'appelant, le délai devient
+         * [ErrorResponse] typé (l'exception sert de message), jamais avalés
+         * silencieusement.
+         */
+        @Suppress("ReturnCount", "SwallowedException")
+        private suspend fun echangerAvecInactivite(requete: ToolingRequest): ToolingEvent? {
+            val sessionCourante = session ?: return null
+            val promesse = CompletableDeferred<ToolingEvent>()
+            promesses[requete.id] = promesse
+            try {
+                sessionCourante.envoyer(requete)
+            } catch (perdue: java.io.IOException) {
+                promesses.remove(requete.id)
+                return null
+            }
+            while (true) {
+                val repere = derniereActiviteSyncMs.get()
+                try {
+                    return withTimeout(delaiInactiviteSyncMs) { promesse.await() }
+                } catch (delaiDepasse: TimeoutCancellationException) {
+                    if (derniereActiviteSyncMs.get() != repere) {
+                        // Un événement est arrivé PENDANT la fenêtre : la
+                        // progression reprend son droit — nouvelle fenêtre.
+                        continue
+                    }
+                    promesses.remove(requete.id)
+                    return ErrorResponse(
+                        id = requete.id,
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        requestId = requete.id,
+                        code = ErrorCode.TIMEOUT,
+                        message =
+                            "aucun événement de sync depuis $delaiInactiviteSyncMs ms " +
+                                "(${delaiDepasse.message ?: "timeout"})",
+                    )
+                }
+            }
+        }
+
+        /**
+         * Envoie une requête et attend SA réponse (promesse + délai TOTAL).
          *
          * Exemptions detekt ciblées (règle 16) : ReturnCount — clauses de
          * garde (absence de session, échec d'envoi) retournant chacune une
@@ -722,6 +827,7 @@ class GradleApiImpl
                         )
                     sorties[buildId]?.close()
                     tachesParBuild[buildId]?.close()
+                    telechargementsParBuild[buildId]?.close()
                 }
         }
 
@@ -731,6 +837,10 @@ class GradleApiImpl
         /** Canal des tâches du build (v3) — borné, envoi suspendant. */
         private fun taches(buildId: String): Channel<EtatTacheBuild> =
             tachesParBuild.computeIfAbsent(buildId) { Channel(TAILLE_TAMPON_SORTIE) }
+
+        /** Canal des téléchargements du build (v4) — borné, envoi suspendant. */
+        private fun telechargements(buildId: String): Channel<TelechargementBuild> =
+            telechargementsParBuild.computeIfAbsent(buildId) { Channel(TAILLE_TAMPON_SORTIE) }
 
         private fun etat(buildId: String): MutableStateFlow<EtatBuild> =
             etats.computeIfAbsent(buildId) {
@@ -772,6 +882,7 @@ class GradleApiImpl
                 )
             sorties[evenement.buildId]?.close()
             tachesParBuild[evenement.buildId]?.close()
+            telechargementsParBuild[evenement.buildId]?.close()
         }
 
         private fun nouvelIdentifiant(): String = UUID.randomUUID().toString()
@@ -857,8 +968,14 @@ class GradleApiImpl
             const val TAILLE_TAMPON_SYNC = 256
 
             /** Délais client des requêtes-réponses (§7.5). */
-            const val DELAI_SYNC_MS: Long = 5 * 60_000L
             const val DELAI_TACHES_MS: Long = 30_000L
+
+            /**
+             * Délai d'INACTIVITÉ de la sync (v4 §3.1) : la fenêtre se réarme
+             * à chaque événement — 5 minutes de TOTAL laissaient mourir une
+             * sync qui progressait (premier lancement, réseau mobile).
+             */
+            const val DELAI_INACTIVITE_SYNC_MS: Long = 90_000L
 
             /** Délai client du classpath LSP (ADR 0058, aligné serveur). */
             const val DELAI_CLASSPATH_MS: Long = 5 * 60_000L
