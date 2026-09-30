@@ -184,17 +184,20 @@ internal class BuildHandler(
      *
      * @return `true` si un build actif a reçu l'entrée, `false` sinon.
      */
+    @Suppress("ReturnCount", "SwallowedException")
     fun envoyerEntree(
         buildId: String,
         texte: String,
     ): Boolean {
         val sortie = entrees[buildId] ?: return false
-        try {
+        // SwallowedException : le serveur n'a pas AppLogger (règle 14),
+        // l'échec d'écriture stdin est bénin (build terminé, pipe cassé).
+        return try {
             sortie.write((texte + "\n").toByteArray(Charsets.UTF_8))
             sortie.flush()
-            return true
+            true
         } catch (e: java.io.IOException) {
-            return false
+            false
         }
     }
 
