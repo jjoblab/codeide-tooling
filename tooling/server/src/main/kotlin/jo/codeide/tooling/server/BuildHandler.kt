@@ -44,6 +44,9 @@ internal class BuildHandler(
     /** Jetons d'annulation des builds en vol, par identifiant de build. */
     private val annulations = ConcurrentHashMap<String, CancellationTokenSource>()
 
+    /** Flux stdin des builds en vol, par identifiant de build (v0.41.1). */
+    private val entrees = ConcurrentHashMap<String, java.io.PipedOutputStream>()
+
     /**
      * Lance le build de la requête et publie son cycle complet :
      * [BuildStarted] à l'acceptation, lignes et tâches en cours de route,
@@ -119,6 +122,10 @@ internal class BuildHandler(
             publierFin(requete.buildId, reussi = false, debut, messageDEchec(t), synthese.get())
         } finally {
             annulations.remove(requete.buildId)
+            // v0.41.1 : nettoyer le flux stdin du build terminé.
+            entrees.remove(requete.buildId)?.let { sortie ->
+                runCatching { sortie.close() }
+            }
         }
     }
 
@@ -170,6 +177,27 @@ internal class BuildHandler(
             },
         )
 
+    /**
+     * Écrit sur l'entrée standard du build en cours (v0.41.1) — permet à
+     * `readln()`, `Scanner(System.in)`, etc. de lire les entrées de
+     * l'utilisateur depuis la console de l'app.
+     *
+     * @return `true` si un build actif a reçu l'entrée, `false` sinon.
+     */
+    fun envoyerEntree(
+        buildId: String,
+        texte: String,
+    ): Boolean {
+        val sortie = entrees[buildId] ?: return false
+        try {
+            sortie.write((texte + "\n").toByteArray(Charsets.UTF_8))
+            sortie.flush()
+            return true
+        } catch (e: java.io.IOException) {
+            return false
+        }
+    }
+
     /** Toutes les annulations en vol (arrêt propre du serveur). */
     fun toutAnnuler() {
         annulations.values.forEach { it.cancel() }
@@ -195,8 +223,16 @@ internal class BuildHandler(
         jeton: CancellationTokenSource,
         ecouteurProgression: EcouteurProgressionCommun,
         synthese: AtomicReference<SyntheseBuild?>,
-    ): org.gradle.tooling.BuildLauncher =
-        connexion
+    ): org.gradle.tooling.BuildLauncher {
+        // v0.41.1 : stdin interactif — un PipedInputStream/PipedOutputStream
+        // pair permet au client d'écrire sur stdin du process Gradle via
+        // BuildInput. Le PipedOutputStream est enregistré dans `entrees`
+        // pour que `envoyerEntree` puisse y écrire.
+        val entreePiped = java.io.PipedOutputStream()
+        val entreeStream = java.io.PipedInputStream(entreePiped, TAILLE_TAMPON_STDIN)
+        entrees[requete.buildId] = entreePiped
+
+        return connexion
             .newBuild()
             .forTasks(*requete.tasks.toTypedArray())
             .withArguments(requete.arguments + CONSOLE_TEXTE)
@@ -229,6 +265,9 @@ internal class BuildHandler(
                 OperationType.FILE_DOWNLOAD,
                 OperationType.PROJECT_CONFIGURATION,
             ).withCancellationToken(jeton.token())
+            // v0.41.1 : brancher stdin pour readln()/Scanner(System.in).
+            .setStandardInput(entreeStream)
+    }
 
     /**
      * Publie le diagnostic extrait d'une ligne de stderr (G5) — une ligne
@@ -311,5 +350,8 @@ internal class BuildHandler(
 
         /** Sortie Gradle en texte brut, sans décorations riches (v3). */
         const val CONSOLE_TEXTE = "--console=plain"
+
+        /** Taille du tampon stdin (v0.41.1 — 4 Ko suffit pour readln). */
+        const val TAILLE_TAMPON_STDIN = 4096
     }
 }

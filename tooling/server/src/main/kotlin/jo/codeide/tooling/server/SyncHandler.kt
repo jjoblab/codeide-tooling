@@ -1,6 +1,7 @@
 package jo.codeide.tooling.server
 
 import jo.codeide.tooling.protocol.GradleProtocol
+import jo.codeide.tooling.protocol.StreamKind
 import jo.codeide.tooling.protocol.SyncPhase
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
@@ -216,6 +217,23 @@ internal class SyncHandler(
                         OperationType.FILE_DOWNLOAD,
                         OperationType.PROJECT_CONFIGURATION,
                     ).addProgressListener(ecouteurStatut)
+                    // v0.41.1 : capturer stdout/stderr pendant la sync —
+                    // les lignes Gradle (Downloading..., > Configure
+                    // project..., Starting process...) apparaissent sous
+                    // l'étape active dans la console, comme Android Studio.
+                    .setStandardOutput(
+                        StreamingOutputStream(
+                            requete.id,
+                            StreamKind.STDOUT,
+                            bus,
+                        ),
+                    ).setStandardError(
+                        StreamingOutputStream(
+                            requete.id,
+                            StreamKind.STDERR,
+                            bus,
+                        ),
+                    )
             // Les marqueurs de phases streamés (vérifié sur le JAR 9.7.1 :
             // `setStreamedValueListener` retourne void, il ne s'enchaîne
             // PAS — posé avant `run`, les valeurs arrivent pendant).

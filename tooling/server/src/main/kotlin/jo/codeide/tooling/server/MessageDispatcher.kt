@@ -1,5 +1,6 @@
 package jo.codeide.tooling.server
 
+import jo.codeide.tooling.protocol.BuildInput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.ClasspathRequest
@@ -96,6 +97,10 @@ internal class MessageDispatcher(
                     traiterAnnulation(requete)
                 }
 
+                is BuildInput -> {
+                    traiterEntree(requete)
+                }
+
                 is SyncRequest,
                 is TasksRequest,
                 is DependenciesRequest,
@@ -139,6 +144,17 @@ internal class MessageDispatcher(
     /** Annulation : l'effet se voit dans le BuildFinished du build visé. */
     private fun traiterAnnulation(requete: CancelRequest) {
         if (!builds.annuler(requete.buildId)) {
+            repondreErreur(
+                requete.id,
+                ErrorCode.INTERNAL_ERROR,
+                "aucun build actif ne porte l'identifiant ${requete.buildId}",
+            )
+        }
+    }
+
+    /** v0.41.1 : écrit sur stdin du build en cours (readln, Scanner). */
+    private fun traiterEntree(requete: BuildInput) {
+        if (!builds.envoyerEntree(requete.buildId, requete.texte)) {
             repondreErreur(
                 requete.id,
                 ErrorCode.INTERNAL_ERROR,
