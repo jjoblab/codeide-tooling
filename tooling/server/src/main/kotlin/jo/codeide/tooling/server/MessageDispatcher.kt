@@ -39,6 +39,7 @@ import java.io.IOException
  * l'autre est journalisée — le [Journal] alimente le rapport d'erreur de
  * l'opérateur (§7.5 : pas de blocage silencieux).
  */
+@Suppress("TooManyFunctions")
 internal class MessageDispatcher(
     private val socket: SocketClient,
     private val pool: GradleConnectorPool,
