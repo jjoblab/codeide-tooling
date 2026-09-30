@@ -132,12 +132,15 @@ internal fun Project.configurerDetekt() {
  *
  * Le formatage vérifie uniquement les sources Kotlin du module ;
  * les fichiers générés (répertoires `build/`) sont exclus.
+ * Les fichiers de templates d'assets (`.kt` dans `templates/`)
+ * sont aussi exclus — ils contiennent des placeholders `{{...}}`
+ * que ktlint ne peut pas valider.
  */
 internal fun Project.configurerSpotless() {
     val spotless = extensions.getByType(SpotlessExtension::class.java)
     spotless.kotlin {
         target("src/**/*.kt")
-        targetExclude("**/build/**")
+        targetExclude("**/build/**", "**/assets/templates/**")
         ktlint(libs.findVersion("ktlint").get().toString())
     }
 }
