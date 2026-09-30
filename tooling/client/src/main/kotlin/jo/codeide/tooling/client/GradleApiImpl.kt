@@ -25,6 +25,7 @@ import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
 import jo.codeide.tooling.protocol.BuildFinished
+import jo.codeide.tooling.protocol.BuildInput
 import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.BuildStarted
@@ -688,6 +689,28 @@ class GradleApiImpl
                             id = nouvelIdentifiant(),
                             protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                             buildId = buildId,
+                        ),
+                    )
+                }
+            }
+        }
+
+        override fun envoyerEntree(
+            buildId: String,
+            texte: String,
+        ) {
+            val sessionCourante = session ?: return
+            // v0.41.1 : fire-and-forget — envoyer l'entrée stdin au build
+            // en cours (readln, Scanner(System.in)). Le serveur écrit sur
+            // le PipedOutputStream branché au process Gradle.
+            porteePompe?.launch {
+                runCatching {
+                    sessionCourante.envoyer(
+                        BuildInput(
+                            id = nouvelIdentifiant(),
+                            protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                            buildId = buildId,
+                            texte = texte,
                         ),
                     )
                 }

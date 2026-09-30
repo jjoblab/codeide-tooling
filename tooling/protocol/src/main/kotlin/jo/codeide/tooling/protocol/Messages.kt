@@ -282,6 +282,26 @@ public data class CancelRequest(
     public val buildId: String,
 ) : ToolingRequest
 
+/**
+ * Écrit sur l'entrée standard (stdin) du build en cours (v0.41.1) —
+ * permet au programme exécuté par `gradle run` de lire `readln()`,
+ * `Scanner(System.in)`, etc. Le client envoie ce message quand
+ * l'utilisateur tape dans le champ de saisie de la console. Le serveur
+ * l'écrit sur le `InputStream` branché au process Gradle.
+ *
+ * @property buildId identifiant du build en cours.
+ * @property texte texte à écrire sur stdin (sans terminaison de ligne —
+ *           le serveur ajoute `\n` car `readln()` attend un retour ligne).
+ */
+@Serializable
+@SerialName("build_input")
+public data class BuildInput(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val buildId: String,
+    public val texte: String,
+) : ToolingRequest
+
 // ---------------------------------------------------------------------------
 // Synchronisation et modèles (§5.3 — Resilient Sync).
 // ---------------------------------------------------------------------------
