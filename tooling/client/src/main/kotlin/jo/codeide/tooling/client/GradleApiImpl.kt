@@ -1,5 +1,7 @@
 package jo.codeide.tooling.client
 
+import jo.codeide.core.domain.AccumulateurLatence
+import jo.codeide.core.domain.AppLogger
 import jo.codeide.core.domain.ClasspathProjet
 import jo.codeide.core.domain.DiagnosticBuild
 import jo.codeide.core.domain.EntreeClasspath
@@ -109,7 +111,9 @@ import javax.inject.Singleton
 @Singleton
 class GradleApiImpl
     @Inject
-    constructor() : GradleToolingRepository {
+    constructor(
+        private val journal: AppLogger,
+    ) : GradleToolingRepository {
         private val connexion = MutableStateFlow(EtatConnexion.DECONNECTEE)
         private val tas = MutableStateFlow(InstantaneTas(0, 0))
         private val diagnosticsGlobal = MutableStateFlow<List<DiagnosticBuild>>(emptyList())
@@ -172,6 +176,19 @@ class GradleApiImpl
          */
         @Volatile
         internal var delaiInactiviteSyncMs: Long = DELAI_INACTIVITE_SYNC_MS
+
+        /**
+         * Latence TRANSPORT des sorties, par build (v0.43.0 — mesure de la
+         * console lente) : écart entre l'émission côté orchestrateur
+         * (`BuildOutput.timestampMs`, pris par `StreamingOutputStream`) et
+         * la réception ICI, juste après décodage de la frame. Le saut qui
+         * grandit désigne le goulot : file de l'EventBus serveur (contre-
+         * pression), écriture socket, lecture client — la difference avec
+         * la latence de publication (GradleService) isole la moitié cliente.
+         * Nettoyé à la fin du build.
+         */
+        private val latencesTransport =
+            ConcurrentHashMap<String, AccumulateurLatence>()
 
         /**
          * Étapes de sync — canal borné, envoi suspendant (v3) : l'ordre
@@ -874,6 +891,9 @@ class GradleApiImpl
 
         /** Une ligne de sortie arrive : elle part dans le canal du build. */
         private suspend fun pomperSortie(evenement: BuildOutput) {
+            latencesTransport
+                .computeIfAbsent(evenement.buildId) { AccumulateurLatence() }
+                .enregistrer(System.currentTimeMillis() - evenement.timestampMs)
             sorties[evenement.buildId]?.send(
                 LigneSortieBuild(
                     buildId = evenement.buildId,
@@ -915,6 +935,17 @@ class GradleApiImpl
                     evenement.cancelled -> StatutBuild.ANNULE
                     else -> StatutBuild.ECHOUE
                 }
+            // v0.43.0 (mesure console lente) : résumé de latence TRANSPORT
+            // au terme du build — émission serveur → réception client. À
+            // lire avec le résumé de PUBLICATION de GradleService : la
+            // difference entre les deux maxima mesure la moitié cliente
+            // (canaux, pompe, zone texte).
+            latencesTransport.remove(evenement.buildId)?.let { latence ->
+                journal.i(TAG_LATENCE) {
+                    "sorties du build ${evenement.buildId} reçues : ${latence.description()} " +
+                        "(émission orchestrateur → réception client, build ${evenement.durationMs} ms)"
+                }
+            }
             etat(evenement.buildId).value =
                 EtatBuild(
                     buildId = evenement.buildId,
@@ -1035,5 +1066,8 @@ class GradleApiImpl
 
             /** Délai client du classpath LSP (ADR 0058, aligné serveur). */
             const val DELAI_CLASSPATH_MS: Long = 5 * 60_000L
+
+            /** Étiquette des résumés de latence (mesure console, v0.43.0). */
+            const val TAG_LATENCE = "ConsoleLatence"
         }
     }

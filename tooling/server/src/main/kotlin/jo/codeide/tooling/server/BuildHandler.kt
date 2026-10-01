@@ -303,6 +303,16 @@ internal class BuildHandler(
         synthese: SyntheseBuild?,
         annule: Boolean = false,
     ) {
+        // v0.43.0 (mesure console lente) : verdict + profondeur de la file
+        // au terme du build. La fenêtre couvre connexion Tooling API +
+        // build (le `debut` de lancer précède `pool.connexion`) — l'écart
+        // avec la ligne « BUILD SUCCESSFUL in X » de Gradle mesure la
+        // connexion/daemon, la profondeur de file mesure le retard
+        // d'écriture vers l'app.
+        Journal.info(
+            "build $buildId conclu : ${System.currentTimeMillis() - debut} ms " +
+                "(reussi=$reussi, annule=$annule, file=${bus.taille()})",
+        )
         bus.publier(
             BuildFinished(
                 id = nouvelId(),

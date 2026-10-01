@@ -9,6 +9,7 @@ import jo.codeide.core.domain.LigneSortieBuild
 import jo.codeide.core.domain.StatutBuild
 import jo.codeide.core.domain.StatutTache
 import jo.codeide.core.domain.TypeEntreeClasspath
+import jo.codeide.core.testing.FakeAppLogger
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
@@ -76,7 +77,7 @@ class GradleApiImplTest {
     private fun nouvelId(): String = UUID.randomUUID().toString()
 
     /** API enregistrée pour le nettoyage automatique en fin de test. */
-    private fun nouvelleApi(): GradleApiImpl = GradleApiImpl().also { api = it }
+    private fun nouvelleApi(): GradleApiImpl = GradleApiImpl(FakeAppLogger()).also { api = it }
 
     private val protocole = GradleProtocol.PROTOCOL_VERSION
 

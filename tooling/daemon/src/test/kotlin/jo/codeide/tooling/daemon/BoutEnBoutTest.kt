@@ -59,7 +59,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * sortie, arrêt) est réel de bout en bout.
  */
 class BoutEnBoutTest {
-    private val api = GradleApiImpl()
+    private val api = GradleApiImpl(FakeAppLogger())
     private val journal = FakeAppLogger()
     private val temporaires = mutableListOf<File>()
     private var daemon: DaemonManager? = null

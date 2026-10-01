@@ -36,7 +36,7 @@ import java.io.File
  * (`DaemonManagerTest`, DECONNECTEE sans boucle).
  */
 class ChaosToolingTest {
-    private val api = GradleApiImpl()
+    private val api = GradleApiImpl(FakeAppLogger())
     private val journal = FakeAppLogger()
     private val temporaires = mutableListOf<File>()
     private var daemon: DaemonManager? = null
