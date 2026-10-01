@@ -158,6 +158,39 @@ phase3 = [
      "Build Utils 2026", "", {}),
 ]
 
+# — Modèles v0.45.0 (phase 4 du roadmap, ADR 0077) : sections Android
+# (minSdk/targetSdk/applicationId), dépendances communes (Android, Spring
+# Boot, KMP) et renommages de l'aperçu. Les renommages passent par le
+# harnais exactement comme depuis le wizard.
+# build : andr-deps (KSP 2.3.12 + Room + Hilt avec le Kotlin intégré AGP),
+# sb-deps (JPA + H2 + Security + Actuator + Validation), kmp-deps
+# (serialization + coroutines + datetime), kt-app-renoms (README renommé).
+phase4 = [
+    ("andr-deps", "android-app", "gradle-android", "21", True, True, "en", "none",
+     "App Deps", "Toutes les dependances",
+     {"appName": "AppDeps", "minSdk": "24", "targetSdk": "37",
+      "includeCoroutines": "true", "includeRetrofit": "true", "includeNavigation": "true",
+      "includeRoom": "true", "includeHilt": "true"}),
+    ("andr-deps-java", "android-app", "gradle-android", "21", True, True, "fr", "none",
+     "Java Deps", "Room et Hilt en Java",
+     {"appName": "JavaDeps", "language": "java", "includeRoom": "true", "includeHilt": "true"}),
+    ("sb-deps", "spring-boot", "gradle-app", "17", True, True, "fr", "none",
+     "Api Deps", "JPA Security Actuator Validation", {"includeJpa": "true", "includeSecurity": "true",
+      "includeActuator": "true", "includeValidation": "true"}),
+    ("kmp-deps", "kotlin-multiplatform", "gradle-kmp", "21", True, True, "fr", "none",
+     "Kmp Deps", "Serialization coroutines datetime",
+     {"includeSerialization": "true", "includeCoroutines": "true", "includeDatetime": "true"}),
+]
+
+# — Renommage de l'aperçu (ADR 0077) sur un projet buildable : README.md
+# devient NOTES.md (le plan écrit sur le disque doit refléter l'aperçu).
+renommages = [
+    ("kt-app-renoms", "kotlin-jvm", "gradle-kts", "21", True, True, "fr", "mit",
+     "Kotlin Renomme", "",
+     {"projectType": "application", "buildSystem": "gradle-kts", "jdkVersion": "21"},
+     {"README.md": "NOTES.md"}),
+]
+
 # Filtre optionnel de combinaisons (expression rationnelle sur l'identifiant) :
 # CODEIDE_COMBINAISONS='^(sb|kmp|andr)' ne vérifie que les nouveaux modèles,
 # utile pour une vérification ciblée ou une exécution par tranches.
@@ -168,6 +201,8 @@ if FILTRE:
     combos = [c for c in combos if _motif.search(c[0])]
     nouveaux = [c for c in nouveaux if _motif.search(c[0])]
     phase3 = [c for c in phase3 if _motif.search(c[0])]
+    phase4 = [c for c in phase4 if _motif.search(c[0])]
+    renommages = [c for c in renommages if _motif.search(c[0])]
 
 entrees = []
 tsv = []
@@ -206,7 +241,7 @@ for (cid, template, type_, build, jdk, tests, wrapper, langue, licence, nom, des
         "app" if type_ == "application" else "lib",
     ]))
 
-for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixes) in nouveaux + phase3:
+for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixes) in nouveaux + phase3 + phase4:
     parametres = dict(fixes)
     manuels = list(fixes)
     parametres["includeTests"] = "true" if tests else "false"
@@ -220,6 +255,33 @@ for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixe
         "description": desc,
         "parametres": parametres,
         "modifiesManuellement": sorted(manuels),
+        "options": {
+            "license": licence,
+            "contentLanguage": langue,
+        },
+    })
+    tsv.append("\t".join([
+        cid, template, "application", build, jdk or "-",
+        "tests" if tests else "notests",
+        "wrapper" if wrapper else "nowrapper",
+        langue, licence, "app",
+    ]))
+
+for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixes, renoms) in renommages:
+    parametres = dict(fixes)
+    manuels = list(fixes)
+    parametres["includeTests"] = "true" if tests else "false"
+    manuels.append("includeTests")
+    parametres["includeWrapper"] = "true" if wrapper else "false"
+    manuels.append("includeWrapper")
+    entrees.append({
+        "id": cid,
+        "templateId": template,
+        "nom": nom,
+        "description": desc,
+        "parametres": parametres,
+        "modifiesManuellement": sorted(manuels),
+        "renommages": renoms,
         "options": {
             "license": licence,
             "contentLanguage": langue,
@@ -364,6 +426,14 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
                         erreur="sortie application inattendue (en)"
                     fi
                 fi
+                # Phase 4 — renommage : l'aperçu ne ment pas, le disque suit.
+                if [ -z "$erreur" ] && [[ "$cid" == *-renoms ]]; then
+                    if [ ! -f "$projet/NOTES.md" ]; then
+                        erreur="README renommé introuvable (NOTES.md)"
+                    elif [ -f "$projet/README.md" ]; then
+                        erreur="README.md aurait dû disparaître au profit de NOTES.md"
+                    fi
+                fi
             fi
             ;;
         maven)
@@ -435,6 +505,8 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
         gradle-app)
             # Spring Boot : build + tests — @SpringBootTest démarre le contexte,
             # le repository et le contrôleur sont couverts (ADR 0075).
+            # Phase 4 : les quatre dépendances doivent être câblées (JPA+H2,
+            # Security, Actuator, Validation) — le contexte charge avec elles.
             cmd=$(gradle_cmd_pour "$projet")
             if [ -z "$cmd" ]; then
                 erreur="ni wrapper ni Gradle système"
@@ -446,6 +518,14 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
                 erreur="contenu Spring non traduit (fr)"
             elif [ "$langue" = "en" ] && ! grep -rq "Hello" "$projet/src/main/kotlin"; then
                 erreur="contenu Spring non traduit (en)"
+            fi
+            # Phase 4 — dépendances Spring toutes activées.
+            if [ -z "$erreur" ] && [ "$cid" = "sb-deps" ]; then
+                for attendu in data.jpa "runtimeOnly(libs.h2)" starter.security starter.actuator starter.validation; do
+                    if ! grep -q "$attendu" "$projet/build.gradle.kts"; then
+                        erreur="dépendance Spring absente ($attendu)"
+                    fi
+                done
             fi
             ;;
         gradle-kmp)
@@ -464,6 +544,18 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
                 erreur="salutation JVM inattendue (fr)"
             elif [ "$langue" = "en" ] && ! grep -q "Hello, Ada" "$TRAVAIL/$cid.sortie"; then
                 erreur="salutation JVM inattendue (en)"
+            fi
+            # Phase 4 — dépendances KMP : plugin serialization + fichiers d'usage.
+            if [ -z "$erreur" ] && [ "$cid" = "kmp-deps" ]; then
+                if ! grep -q "kotlin.serialization" "$projet/build.gradle.kts"; then
+                    erreur="plugin serialization absent (KMP)"
+                elif ! find "$projet/src/commonMain" -name "ConfigurationSalutation.kt" | grep -q .; then
+                    erreur="usage serialization absent (KMP)"
+                elif ! find "$projet/src/commonMain" -name "DelaisSalutation.kt" | grep -q .; then
+                    erreur="usage coroutines absent (KMP)"
+                elif ! find "$projet/src/commonMain" -name "HorodatageSalutation.kt" | grep -q .; then
+                    erreur="usage datetime absent (KMP)"
+                fi
             fi
             ;;
         gradle-android)
@@ -497,6 +589,25 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
             # Variante tiroir : le menu du tiroir doit exister.
             if [ -z "$erreur" ] && [[ "$projet" == *tiroir* ]] && [ ! -f "$projet/app/src/main/res/menu/tiroir.xml" ]; then
                 erreur="menu du tiroir absent"
+            fi
+            # Phase 4 — dépendances : Application Hilt + base Room présentes
+            # et câblées (KSP dans le build, nom dans le manifeste).
+            if [ -z "$erreur" ] && [[ "$cid" == andr-deps* ]]; then
+                case "$cid" in
+                andr-deps)
+                    attendu_app="AppDepsApplication.kt"; attendu_bdd="BddLocale.kt" ;;
+                andr-deps-java)
+                    attendu_app="JavaDepsApplication.java"; attendu_bdd="BddLocale.java" ;;
+                esac
+                if ! find "$projet/app/src/main" -name "$attendu_app" | grep -q .; then
+                    erreur="classe Application Hilt absente ($attendu_app)"
+                elif ! find "$projet/app/src/main" -name "$attendu_bdd" | grep -q .; then
+                    erreur="base Room absente ($attendu_bdd)"
+                elif ! grep -q "alias(libs.plugins.ksp)" "$projet/app/build.gradle.kts"; then
+                    erreur="plugin KSP absent du build"
+                elif ! grep -q "ksp(libs" "$projet/app/build.gradle.kts"; then
+                    erreur="processeurs KSP absents des dépendances"
+                fi
             fi
             ;;
         gradle-android-lib)
