@@ -9,10 +9,10 @@ import jo.codeide.core.domain.LigneSortieBuild
 import jo.codeide.core.domain.StatutBuild
 import jo.codeide.core.domain.StatutTache
 import jo.codeide.core.domain.TypeEntreeClasspath
-import jo.codeide.core.testing.FakeAppLogger
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
+import jo.codeide.core.testing.FakeAppLogger
 import jo.codeide.tooling.protocol.BuildFinished
 import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest

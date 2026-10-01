@@ -41,6 +41,10 @@ internal class BuildHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
 ) {
+    /** Publication de la progression du build (statuts, écouteur,
+     *  diagnostics stderr) — v0.45.1 : extraite, la classe pompait. */
+    private val publications = PublicateurProgressionBuild(bus)
+
     /** Jetons d'annulation des builds en vol, par identifiant de build. */
     private val annulations = ConcurrentHashMap<String, CancellationTokenSource>()
 
@@ -72,6 +76,11 @@ internal class BuildHandler(
                 tasks = requete.tasks,
             ),
         )
+        // v0.45.1 (affichage immédiat, parité Android Studio) : statut
+        // textuel « Exécution des tâches » dès l'acceptation (cf.
+        // PublicateurProgressionBuild.statut) — la console ne reste plus
+        // AVEUGLE entre le lancement et la première ligne de tâche.
+        publications.statut(requete.buildId, "Exécution des tâches : ${requete.tasks.joinToString()}")
         // v0.39.1 (correctif n°4) : accumulateur de la synthèse de fin de
         // build (« N actionable tasks: M executed[, K up-to-date] ») —
         // extrait au fil de l'eau par l'observateur du flux stdout, lu à
@@ -80,11 +89,11 @@ internal class BuildHandler(
         // sans verrou depuis le thread qui LIT le build.
         val synthese = AtomicReference<SyntheseBuild?>(null)
         try {
-            val connexion = pool.connexion(File(requete.projectDir))
+            val connexion = connecter(requete)
             // v4 (addendum §6) : les téléchargements et la configuration se
             // VOIENT pour le build aussi — écouteur commun, borné en débit,
             // rattaché à CE build (compteurs remis à zéro par build).
-            val ecouteurProgression = ecouteurProgressionDu(requete.buildId)
+            val ecouteurProgression = publications.ecouteur(requete.buildId)
             withTimeout(delaiMs) {
                 suspendCancellableCoroutine { suite ->
                     val lanceur = fabriquerLanceur(requete, connexion, jeton, ecouteurProgression, synthese)
@@ -130,6 +139,26 @@ internal class BuildHandler(
     }
 
     /**
+     * Fenêtre de connexion au daemon AVEC états visibles (v0.45.1 —
+     * affichage immédiat) : publie « connexion au daemon Gradle… » AVANT
+     * de connecter — un daemon froid peut mettre 30 s à 2 min à DÉMARRER
+     * sur mobile, précisément la fenêtre où la console restait muette —
+     * puis « daemon Gradle connecté (X ms) » quand la Tooling API répond.
+     * La console du client voit le déroulé AU FUR ET À MESURE, comme la
+     * ligne « Starting Gradle Daemon… » d'Android Studio.
+     */
+    private suspend fun connecter(requete: BuildRequest): org.gradle.tooling.ProjectConnection {
+        publications.statut(requete.buildId, "connexion au daemon Gradle…")
+        val debutConnexion = System.currentTimeMillis()
+        val connexion = pool.connexion(File(requete.projectDir))
+        publications.statut(
+            requete.buildId,
+            "daemon Gradle connecté (${System.currentTimeMillis() - debutConnexion} ms)",
+        )
+        return connexion
+    }
+
+    /**
      * Annule le build [buildId] : `true` si un build en vol a été annulé
      * (l'effet se voit dans son [BuildFinished] final), `false` si aucun
      * build actif ne porte cet identifiant.
@@ -139,43 +168,6 @@ internal class BuildHandler(
         jeton.cancel()
         return true
     }
-
-    /**
-     * Écouteur des téléchargements et de la configuration pour CE build
-     * (v4, addendum §6) : chaque `FILE_DOWNLOAD` devient un
-     * [jo.codeide.tooling.protocol.ProgressEvent] structuré —
-     * « Téléchargement des dépendances n / N » se voit dans l'arbre du
-     * build COMME dans celui de la sync. Compteurs remis à zéro par build.
-     */
-    private fun ecouteurProgressionDu(buildId: String): EcouteurProgressionCommun =
-        EcouteurProgressionCommun(
-            surTelechargement = { detail ->
-                bus.publier(
-                    jo.codeide.tooling.protocol.ProgressEvent(
-                        id = nouvelId(),
-                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                        buildId = buildId,
-                        message = "Téléchargement ${detail.element}",
-                        telechargement = detail,
-                    ),
-                )
-            },
-            surConfiguration = { element, terminee, compteur ->
-                bus.publier(
-                    jo.codeide.tooling.protocol.ProgressEvent(
-                        id = nouvelId(),
-                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
-                        buildId = buildId,
-                        message =
-                            if (terminee) {
-                                "Configuration $element — $compteur"
-                            } else {
-                                "Configuration $element…"
-                            },
-                    ),
-                )
-            },
-        )
 
     /**
      * Écrit sur l'entrée standard du build en cours (v0.41.1) — permet à
@@ -259,7 +251,7 @@ internal class BuildHandler(
                     requete.buildId,
                     StreamKind.STDERR,
                     bus,
-                    observateur = ::publierDiagnostics,
+                    observateur = publications::diagnostic,
                 ),
             ).addProgressListener(ProgressBridge(requete.buildId, bus), OperationType.TASK)
             // v4 (§6) : téléchargements + configuration du build.
@@ -270,16 +262,6 @@ internal class BuildHandler(
             ).withCancellationToken(jeton.token())
             // v0.41.1 : brancher stdin pour readln()/Scanner(System.in).
             .setStandardInput(entreeStream)
-    }
-
-    /**
-     * Publie le diagnostic extrait d'une ligne de stderr (G5) — une ligne
-     * non reconnue (contexte, carets…) est simplement ignorée.
-     */
-    private fun publierDiagnostics(ligne: String) {
-        ParseurDiagnostics.analyser(ligne)?.let { diagnostic ->
-            bus.publier(diagnostic)
-        }
     }
 
     /** Handler Tooling API → coroutine : la fin du build reprend la suite. */

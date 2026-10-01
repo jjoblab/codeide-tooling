@@ -1,7 +1,6 @@
 package jo.codeide.tooling.server
 
 import jo.codeide.tooling.protocol.GradleProtocol
-import jo.codeide.tooling.protocol.StreamKind
 import jo.codeide.tooling.protocol.SyncPhase
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
@@ -217,23 +216,18 @@ internal class SyncHandler(
                         OperationType.FILE_DOWNLOAD,
                         OperationType.PROJECT_CONFIGURATION,
                     ).addProgressListener(ecouteurStatut)
-                    // v0.41.1 : capturer stdout/stderr pendant la sync —
-                    // les lignes Gradle (Downloading..., > Configure
-                    // project..., Starting process...) apparaissent sous
-                    // l'étape active dans la console, comme Android Studio.
-                    .setStandardOutput(
-                        StreamingOutputStream(
-                            requete.id,
-                            StreamKind.STDOUT,
-                            bus,
-                        ),
-                    ).setStandardError(
-                        StreamingOutputStream(
-                            requete.id,
-                            StreamKind.STDERR,
-                            bus,
-                        ),
-                    )
+            // v0.45.1 : PLUS de capture stdout/stderr pendant la sync. La
+            // capture v0.41.1 publiait des BuildOutput avec l'identifiant de
+            // REQUÊTE SYNC comme buildId — or le client n'ouvre un canal de
+            // sortie QUE pour les identifiants de BUILD (GradleApiImpl.sorties)
+            // : chaque ligne était publiée sur le bus puis JETÉE à la
+            // réception (publication morte, jamais affichée depuis la
+            // refonte console v0.42.0). Retirer la capture supprime ce trafic
+            // mort — et le risque de contre-pression inutile sur le fil de
+            // sortie de Gradle pendant la sync. La vue Sync garde l'arbre des
+            // phases RÉELLES (ConteurPhasesSync) : c'est l'état affichable de
+            // la sync, comme la barre de progression d'Android Studio — qui,
+            // lui non plus, ne déverse PAS le stdout de sync.
             // Les marqueurs de phases streamés (vérifié sur le JAR 9.7.1 :
             // `setStreamedValueListener` retourne void, il ne s'enchaîne
             // PAS — posé avant `run`, les valeurs arrivent pendant).
