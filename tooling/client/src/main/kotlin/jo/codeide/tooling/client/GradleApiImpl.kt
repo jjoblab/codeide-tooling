@@ -4,7 +4,6 @@ import jo.codeide.core.domain.AccumulateurLatence
 import jo.codeide.core.domain.AppLogger
 import jo.codeide.core.domain.ClasspathProjet
 import jo.codeide.core.domain.DiagnosticBuild
-import jo.codeide.core.domain.EntreeClasspath
 import jo.codeide.core.domain.EtapeSync
 import jo.codeide.core.domain.EtapeSyncTooling
 import jo.codeide.core.domain.EtatBuild
@@ -16,13 +15,10 @@ import jo.codeide.core.domain.GradleToolingRepository
 import jo.codeide.core.domain.InfoTache
 import jo.codeide.core.domain.InstantaneTas
 import jo.codeide.core.domain.LigneSortieBuild
-import jo.codeide.core.domain.ModuleClasspath
 import jo.codeide.core.domain.ResultatSynchronisation
-import jo.codeide.core.domain.SeveriteDiagnostic
 import jo.codeide.core.domain.StatutBuild
 import jo.codeide.core.domain.StatutTache
 import jo.codeide.core.domain.TelechargementBuild
-import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
@@ -33,12 +29,10 @@ import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.BuildStarted
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.ClasspathEntry
-import jo.codeide.tooling.protocol.ClasspathKind
 import jo.codeide.tooling.protocol.ClasspathRequest
 import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.DependenciesResult
 import jo.codeide.tooling.protocol.Diagnostic
-import jo.codeide.tooling.protocol.DiagnosticSeverity
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
 import jo.codeide.tooling.protocol.GradleProtocol
@@ -47,7 +41,6 @@ import jo.codeide.tooling.protocol.HelloResponse
 import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.PongMessage
 import jo.codeide.tooling.protocol.ProgressEvent
-import jo.codeide.tooling.protocol.StreamKind
 import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
@@ -457,9 +450,12 @@ class GradleApiImpl
 
                 // v4 (§6) — les téléchargements du build alimentent leur
                 // canal (arbre du build, « n / N ») ; les ProgressEvent
-                // textuels restent du statut générique (non affiché).
+                // textuels deviennent des LIGNES de console immédiates
+                // (v0.45.1 — cf. pomperStatutBuild : plus aucun statut du
+                // serveur n'est jeté à la réception).
                 is ProgressEvent -> {
                     pomperTelechargement(evenement)
+                    pomperStatutBuild(evenement)
                 }
 
                 is TasksResult -> {
@@ -904,6 +900,36 @@ class GradleApiImpl
             )
         }
 
+        /**
+         * Un statut TEXTUEL du build traverse (v0.45.1 — affichage
+         * immédiat, parité Android Studio) : le [ProgressEvent] SANS détail
+         * de téléchargement (« Configuration :app… », « Exécution des
+         * tâches : … », « connexion au daemon Gradle… ») devient une LIGNE
+         * du canal de sortie du build — la plomberie existante (pompe
+         * process-wide puis zone texte, append par trame) l'affiche AU
+         * MOMENT où il arrive. Jusqu'ici ces événements étaient publiés par
+         * le serveur puis JETÉS ici (`?: return` sur le détail) : la console
+         * restait aveugle pendant toute la fenêtre pré-tâches (connexion du
+         * daemon, configuration) — précisément là où s'accumulaient les
+         * minutes de silence constatées.
+         *
+         * L'horodatage est pris ICI (réception) : le protocole ne porte pas
+         * de repère d'émission sur ce type — la latence de PUBLICATION de
+         * ces lignes mesure donc la seule moitié cliente, à lire comme un
+         * plancher.
+         */
+        private suspend fun pomperStatutBuild(evenement: ProgressEvent) {
+            if (evenement.telechargement != null) return
+            sorties[evenement.buildId]?.send(
+                LigneSortieBuild(
+                    buildId = evenement.buildId,
+                    flux = FluxSortieBuild.STDOUT,
+                    ligne = evenement.message,
+                    horodatageMs = System.currentTimeMillis(),
+                ),
+            )
+        }
+
         /** Le build démarre : son état passe à EN_COURS. */
         private fun pomperDemarrage(evenement: BuildStarted) {
             etat(evenement.buildId).value =
@@ -963,81 +989,10 @@ class GradleApiImpl
 
         private fun nouvelIdentifiant(): String = UUID.randomUUID().toString()
 
-        private fun StreamKind.versFluxDomaine(): FluxSortieBuild =
-            when (this) {
-                StreamKind.STDOUT -> FluxSortieBuild.STDOUT
-                StreamKind.STDERR -> FluxSortieBuild.STDERR
-            }
-
-        private fun Diagnostic.versDiagnosticDomaine(): DiagnosticBuild =
-            DiagnosticBuild(
-                severite =
-                    when (severity) {
-                        DiagnosticSeverity.ERROR -> SeveriteDiagnostic.ERREUR
-                        DiagnosticSeverity.WARNING -> SeveriteDiagnostic.AVERTISSEMENT
-                        DiagnosticSeverity.INFO -> SeveriteDiagnostic.INFO
-                    },
-                fichier = file,
-                ligne = line,
-                colonne = column,
-                message = message,
-                source = source,
-            )
-
-        /** Traduit un classpath du protocole vers le domaine (ADR 0058).
-         *  v0.40.1 (prompt de suivi §4) : propage les statistiques par module. */
-        private fun ClasspathResult.versClasspathDomaine(): ClasspathProjet =
-            ClasspathProjet(
-                projectDir = projectDir,
-                modules =
-                    modules.map { module ->
-                        ModuleClasspath(
-                            nom = module.name,
-                            dossiersSources = module.sourceDirs,
-                            entrees =
-                                module.entries.map { entree ->
-                                    EntreeClasspath(
-                                        chemin = entree.path,
-                                        type =
-                                            when (entree.kind) {
-                                                ClasspathKind.JAR -> TypeEntreeClasspath.JAR
-                                                ClasspathKind.AAR -> TypeEntreeClasspath.AAR
-                                                ClasspathKind.DOSSIER -> TypeEntreeClasspath.DOSSIER
-                                                ClasspathKind.MODULE -> TypeEntreeClasspath.MODULE
-                                            },
-                                        portee = entree.scope,
-                                        sources = entree.sources,
-                                    )
-                                },
-                            nbJars = module.nbJars,
-                            nbAars = module.nbAars,
-                            nbSources = module.nbSources,
-                            varianteAndroid = module.varianteAndroid,
-                            nbDependancesProjet = module.nbDependancesProjet,
-                            fichiersGeneres = module.fichiersGeneres,
-                            androidJar = module.androidJar,
-                            ignore = module.ignore,
-                            raisonIgnore = module.raisonIgnore,
-                            avertissements = module.avertissements,
-                        )
-                    },
-            )
-
-        private fun ErrorResponse.versErreurDomaine(): AppError.Tooling =
-            AppError.Tooling(
-                code =
-                    when (code) {
-                        ErrorCode.PROTOCOL_VERSION_MISMATCH -> ToolingReason.ProtocolVersion
-                        ErrorCode.HANDSHAKE_FAILED -> ToolingReason.Handshake
-                        ErrorCode.UNKNOWN_REQUEST -> ToolingReason.UnknownRequest
-                        ErrorCode.FRAME_TOO_LARGE, ErrorCode.MALFORMED_FRAME -> ToolingReason.Frame
-                        ErrorCode.TIMEOUT -> ToolingReason.Timeout
-                        ErrorCode.CONNECTION_LOST -> ToolingReason.ConnectionLost
-                        ErrorCode.BUILD_LAUNCH_FAILED -> ToolingReason.BuildLaunch
-                        ErrorCode.INTERNAL_ERROR -> ToolingReason.Internal
-                    },
-                message = message,
-            )
+        // v0.45.1 : les traductions protocole → domaine (versFluxDomaine,
+        // versDiagnosticDomaine, versClasspathDomaine, versErreurDomaine)
+        // vivent désormais dans ConversionsDomaine.kt — fonctions pures
+        // extraites quand la classe a dépassé la limite de complexité.
 
         private companion object {
             /**

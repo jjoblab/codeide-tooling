@@ -1,10 +1,10 @@
 package jo.codeide.tooling.client
 
 import jo.codeide.core.domain.StatutBuild
-import jo.codeide.core.testing.FakeAppLogger
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
+import jo.codeide.core.testing.FakeAppLogger
 import jo.codeide.tooling.protocol.BuildFinished
 import jo.codeide.tooling.protocol.DetailTelechargement
 import jo.codeide.tooling.protocol.GradleProtocol
@@ -31,6 +31,8 @@ import java.util.UUID
  * d'INACTIVITÉ de la sync (la fenêtre se réarme à chaque événement — un
  * téléchargement qui progresse ne meurt plus à 5 minutes) et canal des
  * téléchargements du build (tamponné dès le lancement, fermé à la fin).
+ * v0.45.1 : les ProgressEvent TEXTUELS du build deviennent des lignes de
+ * console immédiates (fin de la console aveugle pré-tâches).
  */
 class GradleApiImplV4Test {
     private val protocole = GradleProtocol.PROTOCOL_VERSION
@@ -159,8 +161,12 @@ class GradleApiImplV4Test {
                         ),
                 ),
             )
-            // Un ProgressEvent TEXTUEL (sans détail) ne traverse pas.
-            session.emettre(ProgressEvent(nouvelId(), protocole, buildId, message = "statut générique"))
+            // v0.45.1 : un ProgressEvent TEXTUEL (sans détail) devient une
+            // LIGNE de console immédiate dans le canal de sortie du build —
+            // il n'est PLUS jeté à la réception (la console restait aveugle
+            // pendant toute la fenêtre pré-tâches : configuration, connexion
+            // au daemon, tâches demandées).
+            session.emettre(ProgressEvent(nouvelId(), protocole, buildId, message = "Configuration :app…"))
             session.emettre(BuildFinished(nouvelId(), protocole, buildId, succeeded = true, durationMs = 1))
 
             val telechargements =
@@ -172,5 +178,18 @@ class GradleApiImplV4Test {
             assertEquals(1_769_000L, telechargements.single().octetsRecus)
             assertTrue(telechargements.single().termine)
             assertEquals(3, telechargements.single().compteur)
+
+            // Le statut textuel traverse VERS LE CANAL DE SORTIE (affichage
+            // immédiat) — collecté APRÈS la fin du build, il draine le tampon
+            // borné du canal fermé à la complétion (aucune perte).
+            val lignesStatut =
+                withTimeout(5_000) {
+                    api.observeBuildOutput(buildId).toList()
+                }
+            assertEquals(
+                "le statut textuel est une ligne de console à part entière",
+                listOf("Configuration :app…"),
+                lignesStatut.map { it.ligne },
+            )
         }
 }

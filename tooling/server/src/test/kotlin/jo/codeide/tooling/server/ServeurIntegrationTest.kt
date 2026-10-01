@@ -22,6 +22,7 @@ import jo.codeide.tooling.protocol.HelloResponse
 import jo.codeide.tooling.protocol.ModelRequest
 import jo.codeide.tooling.protocol.PingMessage
 import jo.codeide.tooling.protocol.PongMessage
+import jo.codeide.tooling.protocol.ProgressEvent
 import jo.codeide.tooling.protocol.ProtocolJson
 import jo.codeide.tooling.protocol.ProtocolMessage
 import jo.codeide.tooling.protocol.SyncPhase
@@ -190,6 +191,56 @@ class ServeurIntegrationTest {
         assertTrue(
             "la tâche saluer devait être annoncée avec son chemin",
             demarrages.any { it.taskPath.endsWith(":saluer") },
+        )
+    }
+
+    @Test
+    fun `la fenetre pre-taches du build est visible - v0_43_1`() {
+        val app = demarrer()
+        val projet = fixture("minimal-java")
+        app.envoyer(
+            BuildRequest(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+                tasks = listOf("saluer"),
+                buildId = "b-fenetre",
+            ),
+        )
+        val fin = app.attendre(DELAI_BUILD, BuildFinished::class)
+        assertTrue("le build devait réussir : ${fin.failureMessage}", fin.succeeded)
+
+        // v0.45.1 (affichage immédiat, parité Android Studio) : la fenêtre
+        // AVANT les lignes de tâche porte des statuts TEXTUELS — « Exécution
+        // des tâches », « connexion au daemon Gradle », « daemon Gradle
+        // connecté » — miroir des « Executing tasks » / « Starting Gradle
+        // Daemon » de la console d'Android Studio. Jusqu'ici le serveur
+        // n'y publiait RIEN : deux minutes de silence d'apparente latence
+        // quand le daemon était froid.
+        val statuts = app.evenementsDe<ProgressEvent>().filter { it.buildId == "b-fenetre" }
+        assertTrue(
+            "les tâches demandées devaient être annoncées : ${statuts.map { it.message }}",
+            statuts.any { it.message.startsWith("Exécution des tâches") && it.message.contains("saluer") },
+        )
+        assertTrue(
+            "la connexion au daemon devait être annoncée avant la première sortie",
+            statuts.any { it.message == "connexion au daemon Gradle…" },
+        )
+        assertTrue(
+            "la connexion devait être CONCLUE avec sa durée",
+            statuts.any { it.message.startsWith("daemon Gradle connecté (") },
+        )
+        // Ordre : les statuts précèdent la PREMIÈRE ligne de sortie du build
+        // (la fenêtre pré-tâches est visible AVANT que Gradle n'écrive).
+        val premierStatut = app.indicesDe<ProgressEvent>().firstOrNull()
+        val premiereSortie = app.indicesDe<BuildOutput>().firstOrNull()
+        assertTrue(
+            "au moins un statut ET une sortie attendus",
+            premierStatut != null && premiereSortie != null,
+        )
+        assertTrue(
+            "le statut ouvre la fenêtre avant la première sortie",
+            (premierStatut ?: 0) < (premiereSortie ?: 0),
         )
     }
 
