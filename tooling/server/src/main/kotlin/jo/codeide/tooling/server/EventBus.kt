@@ -25,6 +25,15 @@ internal interface EventBus {
     /** Publie un événement — bloquant sous contre-pression, jamais perdant. */
     fun publier(evenement: ToolingEvent)
 
+    /**
+     * Profondeur courante de la file d'attente (v0.43.0 — diagnostic de la
+     * console lente) : 0 par défaut pour les doubles de test ; une valeur
+     * qui croît en fin de build signale que le consommateur du socket n'a
+     * pas suivi (contre-pression contre l'émetteur — le retard se voit
+     * alors côté client dans les résumés de latence de transport).
+     */
+    fun taille(): Int = 0
+
     /** Démarre le consommateur unique (idempotent). */
     fun demarrer()
 
@@ -49,6 +58,8 @@ internal class EventBusSocket(
         // put() bloquant : contre-pression sur l'émetteur, aucune perte.
         file.put(evenement)
     }
+
+    override fun taille(): Int = file.size
 
     override fun demarrer() {
         if (consommateur?.isAlive == true) return

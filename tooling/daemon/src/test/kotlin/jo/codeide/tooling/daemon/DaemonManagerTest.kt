@@ -38,7 +38,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  * vit dans [BoutEnBoutTest].
  */
 class DaemonManagerTest {
-    private val api = GradleApiImpl()
+    private val api = GradleApiImpl(FakeAppLogger())
     private val journal = FakeAppLogger()
     private val lanceur = FakeNativeProcessLauncher()
     private val outils = FakeToolchainLocator().apply { jdk = File("/fake/jdk") }

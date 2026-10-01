@@ -1,6 +1,7 @@
 package jo.codeide.tooling.client
 
 import jo.codeide.core.domain.StatutBuild
+import jo.codeide.core.testing.FakeAppLogger
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
 import jo.codeide.core.model.AppResult
@@ -36,7 +37,7 @@ class GradleApiImplV4Test {
 
     private fun nouvelId(): String = UUID.randomUUID().toString()
 
-    private fun nouvelleApi(): GradleApiImpl = GradleApiImpl()
+    private fun nouvelleApi(): GradleApiImpl = GradleApiImpl(FakeAppLogger())
 
     @Test
     fun `la sync survit tant que des evenements arrivent - delai d inactivite et non total`() =
