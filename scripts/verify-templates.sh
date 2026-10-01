@@ -10,7 +10,12 @@
 #
 # Usage : scripts/verify-templates.sh
 # Surcharge d'environnement (chemins des outils) :
-#   CODEIDE_JDK17, CODEIDE_JDK21, CODEIDE_MAVEN, CODEIDE_TRAVAIL
+#   CODEIDE_JDK17, CODEIDE_JDK21, CODEIDE_MAVEN, CODEIDE_TRAVAIL,
+#   CODEIDE_ANDROID_SDK (modèles android-app, défaut /home/z/android-sdk)
+# Filtre optionnel (expression rationnelle sur l'identifiant de combinaison) :
+#   CODEIDE_COMBINAISONS='^(sb|kmp|andr)' — vérification ciblée ou par tranches ;
+#   les combinaisons déjà vérifiées (marqueur .verifie + empreinte des assets)
+#   sont sautées à chaque relance, la reprise est donc gratuite.
 # Le tableau « combinaison → résultat » est affiché en fin d'exécution ;
 # le code de sortie est non nul au moindre échec.
 
@@ -24,6 +29,10 @@ MVN_BIN="${CODEIDE_MAVEN:-$(compgen -G '/home/z/tools/apache-maven-*/bin/mvn' | 
 # Distribution Gradle locale (projets générés SANS wrapper : build avec le
 # Gradle système, comme un utilisateur qui n'embarque pas le wrapper).
 GRADLE_DIS="$(compgen -G "$HOME/.gradle/wrapper/dists/gradle-9.7.1-bin/*/gradle-9.7.1/bin/gradle" | head -1 || true)"
+# SDK Android pour les modèles android-app (combinaisons andr-*) : absent →
+# ces combinaisons échouent avec un message explicite (le reste du script,
+# JVM pur, reste exécutable).
+SDK_ANDROID="${CODEIDE_ANDROID_SDK:-${ANDROID_HOME:-/home/z/android-sdk}}"
 
 echec_global=0
 declare -a lignes_tableau=()
@@ -44,6 +53,11 @@ if [ -n "$GRADLE_DIS" ]; then
     note "Gradle (sans wrapper) : $GRADLE_DIS"
 else
     note "Gradle système absent : les projets sans wrapper seront construits via un wrapper voisin"
+fi
+if [ -d "$SDK_ANDROID/platforms" ]; then
+    note "SDK Android : $SDK_ANDROID"
+else
+    note "SDK Android introuvable (CODEIDE_ANDROID_SDK) : $SDK_ANDROID — les combinaisons andr-* échoueront"
 fi
 
 mkdir -p "$TRAVAIL"
@@ -100,6 +114,36 @@ combos = [
      "Console & CLI % 2026 \U0001F600", "Autre description \"hostile\" \\ $x$"),
 ]
 
+# — Modèles v0.43.0 (phase 2 du roadmap, ADR 0075) : Spring Boot, KMP,
+# Android app. Le packageName y est laissé LIBRE pour éprouver la
+# dérivation com.example.<app|artefact> (defaultFrom) ; seuls les
+# interrupteurs et le nom d'app (source de la dérivation Android) sont figés.
+# build : gradle-app (Spring Boot), gradle-kmp, gradle-android.
+nouveaux = [
+    ("sb-fr", "spring-boot", "gradle-app", "17", True, True, "fr", "none",
+     "DemoApi", "Une API de démonstration", {}),
+    ("sb-en-min", "spring-boot", "gradle-app", "17", False, False, "en", "mit",
+     "Web Service", "A Spring service", {}),
+    ("kmp-fr", "kotlin-multiplatform", "gradle-kmp", "21", True, True, "fr", "none",
+     "KmpLib", "Une bibliothèque partagée", {}),
+    ("kmp-en-min", "kotlin-multiplatform", "gradle-kmp", "21", False, False, "en", "apache-2.0",
+     "Multi Lib", "", {}),
+    ("andr-fr", "android-app", "gradle-android", "21", True, True, "fr", "none",
+     "MonApp", "", {"appName": "MonApp"}),
+    ("andr-en-min", "android-app", "gradle-android", "21", False, False, "en", "mit",
+     "My Cool App!", "Description hostile </project> & $x$", {"appName": "My Cool App"}),
+]
+
+# Filtre optionnel de combinaisons (expression rationnelle sur l'identifiant) :
+# CODEIDE_COMBINAISONS='^(sb|kmp|andr)' ne vérifie que les nouveaux modèles,
+# utile pour une vérification ciblée ou une exécution par tranches.
+FILTRE = __import__("os").environ.get("CODEIDE_COMBINAISONS", "")
+if FILTRE:
+    import re as _re
+    _motif = _re.compile(FILTRE)
+    combos = [c for c in combos if _motif.search(c[0])]
+    nouveaux = [c for c in nouveaux if _motif.search(c[0])]
+
 entrees = []
 tsv = []
 for (cid, template, type_, build, jdk, tests, wrapper, langue, licence, nom, desc) in combos:
@@ -135,6 +179,32 @@ for (cid, template, type_, build, jdk, tests, wrapper, langue, licence, nom, des
         "wrapper" if wrapper else "nowrapper",
         langue, licence,
         "app" if type_ == "application" else "lib",
+    ]))
+
+for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixes) in nouveaux:
+    parametres = dict(fixes)
+    manuels = list(fixes)
+    parametres["includeTests"] = "true" if tests else "false"
+    manuels.append("includeTests")
+    parametres["includeWrapper"] = "true" if wrapper else "false"
+    manuels.append("includeWrapper")
+    entrees.append({
+        "id": cid,
+        "templateId": template,
+        "nom": nom,
+        "description": desc,
+        "parametres": parametres,
+        "modifiesManuellement": sorted(manuels),
+        "options": {
+            "license": licence,
+            "contentLanguage": langue,
+        },
+    })
+    tsv.append("\t".join([
+        cid, template, "application", build, jdk or "-",
+        "tests" if tests else "notests",
+        "wrapper" if wrapper else "nowrapper",
+        langue, licence, "app",
     ]))
 
 with open(f"{travail}/combos.json", "w", encoding="utf-8") as f:
@@ -201,6 +271,17 @@ lancer_sortie_attendue() { # $1 projet $2 première ligne attendue
     return 0
 }
 
+# Commande Gradle d'un projet généré : son wrapper s'il embarque, sinon la
+# distribution système (utilisateur sans wrapper) — vide si indisponible.
+gradle_cmd_pour() { # $1 projet
+    if [ -f "$1/gradlew" ]; then
+        chmod +x "$1/gradlew"
+        printf '%s\n' "$1/gradlew"
+    elif [ -n "$GRADLE_DIS" ]; then
+        printf '%s\n' "$GRADLE_DIS"
+    fi
+}
+
 combinaison_ko() {
     lignes_tableau+=("$(printf '%-22s | %s' "$1" "KO — $2")")
     echec_global=1
@@ -213,7 +294,7 @@ combinaison_ok() {
 EMPREINTE_ASSETS=$( (find "$RACINE/app/src/main/assets/templates" -type f | sort | xargs sha256sum; \
     sha256sum "$RACINE/gradle/wrapper/gradle-wrapper.jar") 2>/dev/null | sha256sum | cut -d' ' -f1)
 
-note "Builds réels (18 combinaisons) — ceci prend plusieurs minutes…"
+note "Builds réels ($(wc -l < "$TRAVAIL/matrix.tsv") combinaisons) — ceci prend plusieurs minutes…"
 while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licence role; do
     projet="$TRAVAIL/modeles/$cid"
     erreur=""
@@ -324,6 +405,60 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
                     fi
                 fi
                 rm -rf "$jetable"
+            fi
+            ;;
+        gradle-app)
+            # Spring Boot : build + tests — @SpringBootTest démarre le contexte,
+            # le repository et le contrôleur sont couverts (ADR 0075).
+            cmd=$(gradle_cmd_pour "$projet")
+            if [ -z "$cmd" ]; then
+                erreur="ni wrapper ni Gradle système"
+            elif ! (cd "$projet" && JAVA_HOME="$jdk_home" "$cmd" --no-daemon --console=plain -q build >/dev/null 2>"$TRAVAIL/$cid.log"); then
+                erreur="gradle (build spring)"
+            elif [ "$tests" = "tests" ] && [ ! -f "$projet/build/reports/tests/test/index.html" ]; then
+                erreur="rapport de tests Spring absent"
+            elif [ "$langue" = "fr" ] && ! grep -rq "Bonjour" "$projet/src/main/kotlin"; then
+                erreur="contenu Spring non traduit (fr)"
+            elif [ "$langue" = "en" ] && ! grep -rq "Hello" "$projet/src/main/kotlin"; then
+                erreur="contenu Spring non traduit (en)"
+            fi
+            ;;
+        gradle-kmp)
+            # KMP : build + tests jvmTest + exécution (Main.kt via la tâche run
+            # JavaExec) — le expect/actual du Greeter doit compiler et courir.
+            cmd=$(gradle_cmd_pour "$projet")
+            if [ -z "$cmd" ]; then
+                erreur="ni wrapper ni Gradle système"
+            elif ! (cd "$projet" && JAVA_HOME="$jdk_home" "$cmd" --no-daemon --console=plain -q build run >"$TRAVAIL/$cid.sortie" 2>"$TRAVAIL/$cid.log"); then
+                erreur="gradle (build kmp)"
+            elif [ "$tests" = "tests" ] && [ ! -f "$projet/build/reports/tests/jvmTest/index.html" ]; then
+                erreur="rapport de tests KMP absent"
+            elif ! grep -q "Running on: JVM" "$TRAVAIL/$cid.sortie"; then
+                erreur="sortie JVM inattendue"
+            elif [ "$langue" = "fr" ] && ! grep -q "Bonjour, Ada" "$TRAVAIL/$cid.sortie"; then
+                erreur="salutation JVM inattendue (fr)"
+            elif [ "$langue" = "en" ] && ! grep -q "Hello, Ada" "$TRAVAIL/$cid.sortie"; then
+                erreur="salutation JVM inattendue (en)"
+            fi
+            ;;
+        gradle-android)
+            # Android app : assembleDebug + tests unitaires de :app avec le SDK
+            # local (CODEIDE_ANDROID_SDK), APK contrôlé (ADR 0075).
+            cmd=$(gradle_cmd_pour "$projet")
+            if [ ! -d "$SDK_ANDROID/platforms" ]; then
+                erreur="SDK Android introuvable (CODEIDE_ANDROID_SDK)"
+            elif [ -z "$cmd" ]; then
+                erreur="ni wrapper ni Gradle système"
+            elif ! (cd "$projet" && JAVA_HOME="$jdk_home" ANDROID_HOME="$SDK_ANDROID" "$cmd" --no-daemon --console=plain -q :app:assembleDebug >/dev/null 2>"$TRAVAIL/$cid.log"); then
+                erreur="gradle (assembleDebug)"
+            elif [ ! -f "$projet/app/build/outputs/apk/debug/app-debug.apk" ]; then
+                erreur="APK de débogage absent"
+            elif [ "$tests" = "tests" ]; then
+                if ! (cd "$projet" && JAVA_HOME="$jdk_home" ANDROID_HOME="$SDK_ANDROID" "$cmd" --no-daemon --console=plain -q :app:testDebugUnitTest >/dev/null 2>>"$TRAVAIL/$cid.log"); then
+                    erreur="gradle (testDebugUnitTest)"
+                elif ! ls "$projet"/app/build/test-results/testDebugUnitTest/TEST-*.xml >/dev/null 2>&1; then
+                    erreur="résultats de tests Android absents"
+                fi
             fi
             ;;
         esac
