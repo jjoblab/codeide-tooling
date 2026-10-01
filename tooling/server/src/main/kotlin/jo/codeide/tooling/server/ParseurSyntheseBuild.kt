@@ -51,6 +51,22 @@ internal object ParseurSyntheseBuild {
     private const val GROUPE_A_JOUR = 3
 
     /**
+     * Motif de la ligne de VERDICT de Gradle (v0.45.2 — décomposition
+     * honnête des durées) : `BUILD SUCCESSFUL in 10s`, `BUILD FAILED in
+     * 1m 30s`, `BUILD SUCCESSFUL in 800ms`… La durée est la partie après
+     * « in », une suite de couples valeur+unité (`1m 30s`, `2m 3s 456ms`,
+     * `1h 2m`). L'horloge de Gradle démarre quand le build est planifié
+     * sur un daemon PRÊT : elle EXCLUT le démarrage du daemon — c'est
+     * l'écart avec l'horloge client qui désigne la fenêtre aveugle
+     * (retour de terrain : « in 10s » affiché au bout de 200-300 s).
+     */
+    private val MOTIF_VERDICT =
+        Regex("""^BUILD\s+(?:SUCCESSFUL|FAILED)\s+in\s+(.+)$""", RegexOption.IGNORE_CASE)
+
+    /** Un couple valeur+unité de la durée (`456ms`, `30s`, `1m`, `2h`). */
+    private val MOTIF_DUREE = Regex("""^(\d+(?:[.,]\d+)?)\s*(ms|m|h|s)$""", RegexOption.IGNORE_CASE)
+
+    /**
      * Analyse UNE ligne de stdout ; `null` si ce n'est pas la synthèse
      * de fin de build.
      *
@@ -78,6 +94,53 @@ internal object ParseurSyntheseBuild {
             null
         }
     }
+
+    /**
+     * Analyse UNE ligne de stdout ; `null` si ce n'est pas un verdict
+     * de fin de build AVEC durée (v0.45.2).
+     *
+     * Gradle formate ses durées en couples valeur+unité séparés par des
+     * espaces : `800ms`, `6s`, `1m 30s`, `2m 3s 456ms`, `1h 2m`. Les
+     * valeurs décimales (ex. `1.5s`) sont acceptées, la virgule
+     * française aussi (`1,5s`) — Gradle n'imprime qu'entier en pratique,
+     * la tolérance est de la robustesse gratuite.
+     *
+     * Exemption detekt ciblée (règle 16) : ReturnCount — clauses de garde
+     * typées (pas un verdict, jeton illisible, valeur illisible) retournant
+     * chacune `null` ; même justification que [analyser].
+     *
+     * @return la durée RAPPORTÉE PAR GRADLE en millisecondes (son
+     *         horloge à LUI — daemon exclu) quand la ligne est un
+     *         verdict, `null` sinon.
+     */
+    @Suppress("ReturnCount")
+    fun analyserDureeMs(ligne: String): Long? {
+        val duree = MOTIF_VERDICT.find(ligne.trim())?.groupValues?.get(1) ?: return null
+        var total = 0.0
+        var vu = false
+        duree.trim().split(Regex("\\s+")).forEach { jeton ->
+            val correspondance = MOTIF_DUREE.find(jeton) ?: return null
+            val valeur = correspondance.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+            total +=
+                when (correspondance.groupValues[2].lowercase()) {
+                    "ms" -> valeur
+                    "s" -> valeur * MS_PAR_SECONDE
+                    "m" -> valeur * MS_PAR_MINUTE
+                    else -> valeur * MS_PAR_HEURE
+                }
+            vu = true
+        }
+        return if (vu) total.toLong() else null
+    }
+
+    /** Millisecondes par seconde (définition de l'unité). */
+    private const val MS_PAR_SECONDE = 1_000.0
+
+    /** Millisecondes par minute (définition de l'unité). */
+    private const val MS_PAR_MINUTE = 60_000.0
+
+    /** Millisecondes par heure (définition de l'unité). */
+    private const val MS_PAR_HEURE = 3_600_000.0
 }
 
 /**
@@ -94,3 +157,33 @@ internal data class SyntheseBuild(
     val executedTasks: Int,
     val upToDateTasks: Int?,
 )
+
+/**
+ * Conclusion d'un build extraite du stdout au FIL DE L'EAU (v0.45.2) :
+ * l'observateur de [StreamingOutputStream] y écrit DEPUIS UN FIL DE
+ * GRADLE pendant que le build tourne, [BuildHandler.publierFin] la lit
+ * à la reprise — d'où les atomiques (visibilité inter-fils, même
+ * discipline que l'AtomicReference qu'ils remplacent).
+ *
+ * @property synthese comptes de tâches de la ligne « N actionable tasks ».
+ * @property dureeRapporteeMs durée RAPPORTÉE PAR GRADLE par la ligne
+ *           « BUILD SUCCESSFUL/FAILED in Xs » (son horloge à LUI, daemon
+ *           exclu) ; -1 tant qu'aucun verdict n'a été observé.
+ */
+internal class ConclusionStdout {
+    /** Comptes de tâches (« N actionable tasks: M executed[, K up-to-date] »). */
+    val synthese =
+        java.util.concurrent.atomic
+            .AtomicReference<SyntheseBuild?>(null)
+
+    /** Durée rapportée par Gradle (ms), -1 si non observée. */
+    val dureeRapporteeMs =
+        java.util.concurrent.atomic
+            .AtomicLong(-1)
+
+    /** Enregistre UNE ligne de stdout : synthèse et/ou durée si elle correspond. */
+    fun enregistrer(ligne: String) {
+        ParseurSyntheseBuild.analyser(ligne)?.let { synthese.set(it) }
+        ParseurSyntheseBuild.analyserDureeMs(ligne)?.let { dureeRapporteeMs.set(it) }
+    }
+}

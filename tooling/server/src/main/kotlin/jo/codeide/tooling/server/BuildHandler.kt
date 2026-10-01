@@ -16,7 +16,6 @@ import org.gradle.tooling.ResultHandler
 import org.gradle.tooling.events.OperationType
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -81,13 +80,11 @@ internal class BuildHandler(
         // PublicateurProgressionBuild.statut) — la console ne reste plus
         // AVEUGLE entre le lancement et la première ligne de tâche.
         publications.statut(requete.buildId, "Exécution des tâches : ${requete.tasks.joinToString()}")
-        // v0.39.1 (correctif n°4) : accumulateur de la synthèse de fin de
-        // build (« N actionable tasks: M executed[, K up-to-date] ») —
-        // extrait au fil de l'eau par l'observateur du flux stdout, lu à
-        // la fin pour remplir [BuildFinished]. Un AtomicReference permet
-        // à l'observateur synchrone du flux (autre fil Gradle) d'écrire
-        // sans verrou depuis le thread qui LIT le build.
-        val synthese = AtomicReference<SyntheseBuild?>(null)
+        // v0.39.1 (correctif n°4) : conclusion extraite du stdout au fil de
+        // l'eau (synthèse « N actionable tasks » + durée RAPPORTÉE PAR
+        // GRADLE « in Xs », v0.45.2) — lue à la fin pour remplir
+        // [BuildFinished] et la décomposition honnête des durées.
+        val conclusion = ConclusionStdout()
         try {
             val connexion = connecter(requete)
             // v4 (addendum §6) : les téléchargements et la configuration se
@@ -96,16 +93,16 @@ internal class BuildHandler(
             val ecouteurProgression = publications.ecouteur(requete.buildId)
             withTimeout(delaiMs) {
                 suspendCancellableCoroutine { suite ->
-                    val lanceur = fabriquerLanceur(requete, connexion, jeton, ecouteurProgression, synthese)
+                    val lanceur = fabriquerLanceur(requete, connexion, jeton, ecouteurProgression, conclusion, debut)
                     suite.invokeOnCancellation { jeton.cancel() }
                     lanceur.run(handlerResultat(suite))
                 }
             }
-            publierFin(requete.buildId, reussi = true, debut, null, synthese.get())
+            publierFin(requete.buildId, reussi = true, debut, null, conclusion)
         } catch (delai: TimeoutCancellationException) {
             Journal.warn("build ${requete.buildId} : garde de $delaiMs ms dépassée (${delai.message})")
             jeton.cancel()
-            publierFin(requete.buildId, reussi = false, debut, "délai de $delaiMs ms dépassé", synthese.get())
+            publierFin(requete.buildId, reussi = false, debut, "délai de $delaiMs ms dépassé", conclusion)
         } catch (annulation: CancellationException) {
             jeton.cancel()
             // v0.39.1 (correctif n°5) : distingué de l'échec — l'UI affiche
@@ -115,7 +112,7 @@ internal class BuildHandler(
                 reussi = false,
                 debut,
                 "annulé",
-                synthese.get(),
+                conclusion,
                 annule = true,
             )
             throw annulation
@@ -125,10 +122,10 @@ internal class BuildHandler(
                 reussi = false,
                 debut,
                 messageDEchec(echec),
-                synthese.get(),
+                conclusion,
             )
         } catch (t: Throwable) {
-            publierFin(requete.buildId, reussi = false, debut, messageDEchec(t), synthese.get())
+            publierFin(requete.buildId, reussi = false, debut, messageDEchec(t), conclusion)
         } finally {
             annulations.remove(requete.buildId)
             // v0.41.1 : nettoyer le flux stdin du build terminé.
@@ -139,23 +136,25 @@ internal class BuildHandler(
     }
 
     /**
-     * Fenêtre de connexion au daemon AVEC états visibles (v0.45.1 —
-     * affichage immédiat) : publie « connexion au daemon Gradle… » AVANT
-     * de connecter — un daemon froid peut mettre 30 s à 2 min à DÉMARRER
-     * sur mobile, précisément la fenêtre où la console restait muette —
-     * puis « daemon Gradle connecté (X ms) » quand la Tooling API répond.
-     * La console du client voit le déroulé AU FUR ET À MESURE, comme la
-     * ligne « Starting Gradle Daemon… » d'Android Studio.
+     * Fenêtre de connexion au daemon (v0.45.2 — corrigée sur retour de
+     * terrain : « BUILD SUCCESSFUL in 10 s » affiché au bout de 200-300 s).
+     *
+     * `pool.connexion()` rend un objet ProjectConnection PARESSEUX en
+     * quelques centaines de ms — MÊME quand aucun daemon ne tourne : le
+     * vrai démarrage (60 s à 4 min sur téléphone) se produit DANS
+     * `newBuild().run()`. L'ancienne ligne « daemon Gradle connecté
+     * (X ms) » publiée ici mesurait donc ~0 ms en TOUTES circonstances :
+     * elle AFFIRMAIT une connexion qui n'existait pas encore.
+     *
+     * Désormais la fenêtre s'annonce (« connexion au daemon Gradle… »)
+     * et se CONCLUT sur un fait : le statut textuel « Connecting to
+     * Gradle Daemon » de la Tooling API, capté par
+     * [EcouteurStatutDaemonBuild] — qui publie aussi « Starting Gradle
+     * Daemon » pendant le spawn, comme la console d'Android Studio.
      */
     private suspend fun connecter(requete: BuildRequest): org.gradle.tooling.ProjectConnection {
         publications.statut(requete.buildId, "connexion au daemon Gradle…")
-        val debutConnexion = System.currentTimeMillis()
-        val connexion = pool.connexion(File(requete.projectDir))
-        publications.statut(
-            requete.buildId,
-            "daemon Gradle connecté (${System.currentTimeMillis() - debutConnexion} ms)",
-        )
-        return connexion
+        return pool.connexion(File(requete.projectDir))
     }
 
     /**
@@ -205,19 +204,24 @@ internal class BuildHandler(
      * sorties ligne à ligne (stderr porte AUSSI les diagnostics de
      * compilation — G5 : javac/kotlinc y écrivent leurs positions, pas
      * dans le message d'échec final), pont des tâches, écouteur des
-     * téléchargements/configuration (v4 §6) et jeton d'annulation.
+     * téléchargements/configuration (v4 §6), écouteur TEXTUEL de la
+     * fenêtre daemon (v0.45.2 — « Starting Gradle Daemon » visible,
+     * connexion conclue sur un fait) et jeton d'annulation.
      *
-     * Exemption detekt ciblée (règle 16) : SpreadOperator — la Tooling API
-     * n'expose `forTasks` qu'en vararg (aucune surcharge `Iterable<String>`),
-     * l'éclatement de la liste est l'unique option.
+     * Exemption detekt ciblée (règle 16) : LongParameterList — boîte de
+     * fabrication du lanceur, les 6 champs arrivent ensemble du `lancer`
+     * (même justification que `publierFin`) ; SpreadOperator — la Tooling
+     * API n'expose `forTasks` qu'en vararg (aucune surcharge
+     * `Iterable<String>`), l'éclatement de la liste est l'unique option.
      */
-    @Suppress("SpreadOperator")
+    @Suppress("SpreadOperator", "LongParameterList")
     private fun fabriquerLanceur(
         requete: BuildRequest,
         connexion: org.gradle.tooling.ProjectConnection,
         jeton: CancellationTokenSource,
         ecouteurProgression: EcouteurProgressionCommun,
-        synthese: AtomicReference<SyntheseBuild?>,
+        conclusion: ConclusionStdout,
+        debut: Long,
     ): org.gradle.tooling.BuildLauncher {
         // v0.41.1 : stdin interactif — un PipedInputStream/PipedOutputStream
         // pair permet au client d'écrire sur stdin du process Gradle via
@@ -232,19 +236,17 @@ internal class BuildHandler(
             .forTasks(*requete.tasks.toTypedArray())
             .withArguments(requete.arguments + CONSOLE_TEXTE)
             // v0.39.1 (correctif n°4) : l'observateur du flux stdout allume
-            // l'accumulateur de synthèse dès qu'il voit la ligne
-            // « N actionable tasks: M executed[, K up-to-date] ». Comme
-            // l'observateur est appelé AVANT la publication du BuildOutput
-            // (cf. StreamingOutputStream.viderLigne), la synthèse est
-            // prête quand le build se termine — sans doublon de publication.
+            // l'accumulateur de conclusion (synthèse + durée Gradle) dès
+            // qu'il voit les lignes de fin. Comme l'observateur est appelé
+            // AVANT la publication du BuildOutput (cf.
+            // StreamingOutputStream.viderLigne), la conclusion est prête
+            // quand le build se termine — sans doublon de publication.
             .setStandardOutput(
                 StreamingOutputStream(
                     requete.buildId,
                     StreamKind.STDOUT,
                     bus,
-                    observateur = { ligne ->
-                        ParseurSyntheseBuild.analyser(ligne)?.let { synthese.set(it) }
-                    },
+                    observateur = conclusion::enregistrer,
                 ),
             ).setStandardError(
                 StreamingOutputStream(
@@ -259,6 +261,16 @@ internal class BuildHandler(
                 ecouteurProgression,
                 OperationType.FILE_DOWNLOAD,
                 OperationType.PROJECT_CONFIGURATION,
+            )
+            // v0.45.2 (fenêtre daemon visible) : le listener TEXTUEL voit
+            // « Starting Gradle Daemon » / « Connecting to Gradle Daemon » —
+            // les seuls signaux pendant le spawn, qui prend des MINUTES sur
+            // téléphone ; sans lui la console est muette précisément là où
+            // se concentre le retard constaté sur le terrain.
+            .addProgressListener(
+                EcouteurStatutDaemonBuild(debut) { message ->
+                    publications.statut(requete.buildId, message)
+                },
             ).withCancellationToken(jeton.token())
             // v0.41.1 : brancher stdin pour readln()/Scanner(System.in).
             .setStandardInput(entreeStream)
@@ -276,15 +288,23 @@ internal class BuildHandler(
             }
         }
 
-    @Suppress("LongParameterList") // boîte de conclusion d'un build — 6 champs arrival
+    @Suppress("LongParameterList") // boîte de conclusion d'un build — 6 champs arrivent ensemble
     private fun publierFin(
         buildId: String,
         reussi: Boolean,
         debut: Long,
         message: String?,
-        synthese: SyntheseBuild?,
+        conclusion: ConclusionStdout,
         annule: Boolean = false,
     ) {
+        val synthese = conclusion.synthese.get()
+        val dureeTotaleMs = System.currentTimeMillis() - debut
+        // v0.45.2 (décomposition honnête) : cf.
+        // PublicateurProgressionBuild.conclusionDurees — l'utilisateur
+        // voyait « in 10s » au bout de 200-300 s sans pouvoir nommer
+        // l'écart : la console le nomme désormais.
+        val dureeGradleMs = conclusion.dureeRapporteeMs.get().takeIf { it >= 0 }
+        publications.conclusionDurees(buildId, dureeTotaleMs, dureeGradleMs)
         // v0.43.0 (mesure console lente) : verdict + profondeur de la file
         // au terme du build. La fenêtre couvre connexion Tooling API +
         // build (le `debut` de lancer précède `pool.connexion`) — l'écart
@@ -292,8 +312,8 @@ internal class BuildHandler(
         // connexion/daemon, la profondeur de file mesure le retard
         // d'écriture vers l'app.
         Journal.info(
-            "build $buildId conclu : ${System.currentTimeMillis() - debut} ms " +
-                "(reussi=$reussi, annule=$annule, file=${bus.taille()})",
+            "build $buildId conclu : $dureeTotaleMs ms " +
+                "(reussi=$reussi, annule=$annule, gradle=${dureeGradleMs ?: "inconnue"} ms, file=${bus.taille()})",
         )
         bus.publier(
             BuildFinished(
@@ -301,7 +321,7 @@ internal class BuildHandler(
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 buildId = buildId,
                 succeeded = reussi,
-                durationMs = System.currentTimeMillis() - debut,
+                durationMs = dureeTotaleMs,
                 failureMessage = message,
                 // v0.39.1 (correctif n°5) : un build ANNULÉ n'est pas un
                 // échec — l'UI affiche l'état `ANNULE` atténué, pas le
