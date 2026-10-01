@@ -79,4 +79,60 @@ class ParseurSyntheseBuildTest {
         assertEquals(0, synthese?.executedTasks)
         assertEquals(15, synthese?.upToDateTasks)
     }
+
+    // ------------------------------------------------------------------
+    // Durée RAPPORTÉE PAR GRADLE (v0.45.2 — décomposition honnête des
+    // durées : « in 10s » lu, comparé au total vu par l'app).
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `la duree rapportee par gradle se lit en secondes`() {
+        assertEquals(10_000L, ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in 10s"))
+    }
+
+    @Test
+    fun `la duree rapportee par gradle se lit en millisecondes`() {
+        assertEquals(800L, ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in 800ms"))
+    }
+
+    @Test
+    fun `la duree d un echec se lit aussi`() {
+        assertEquals(90_000L, ParseurSyntheseBuild.analyserDureeMs("BUILD FAILED in 1m 30s"))
+    }
+
+    @Test
+    fun `la duree composee minutes secondes millisecondes se lit`() {
+        assertEquals(123_456L, ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in 2m 3s 456ms"))
+    }
+
+    @Test
+    fun `la duree en heures et minutes se lit`() {
+        assertEquals(3_720_000L, ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in 1h 2m"))
+    }
+
+    @Test
+    fun `une duree decimale est toleree`() {
+        assertEquals(1_500L, ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in 1.5s"))
+        assertEquals(1_500L, ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in 1,5s"))
+    }
+
+    @Test
+    fun `un verdict sans duree ne se lit pas`() {
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL"))
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("BUILD FAILED"))
+    }
+
+    @Test
+    fun `une duree illisible ne se lit pas`() {
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in about now"))
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("BUILD SUCCESSFUL in "))
+    }
+
+    @Test
+    fun `une ligne quelconque n est pas un verdict`() {
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("7 actionable tasks: 2 executed, 5 up-to-date"))
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("Configuration cache entry stored"))
+        assertNull(ParseurSyntheseBuild.analyserDureeMs("> Task :app:assemble"))
+        assertNull(ParseurSyntheseBuild.analyserDureeMs(""))
+    }
 }

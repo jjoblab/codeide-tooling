@@ -308,6 +308,13 @@ internal class SyncHandler(
  * signal pendant la résolution de la distribution (« Downloading… »,
  * « Unzipping… ») — ils nourrissent l'élément courant de la phase
  * DISTRIBUTION, sans jamais traverser le bus en flot continu.
+ *
+ * v0.45.2 (fenêtre daemon visible) : les statuts parlant du DAEMON
+ * (« Starting Gradle Daemon », « Connecting to Gradle Daemon » — le
+ * spawn peut prendre des minutes sur téléphone) alimentent la phase
+ * DAEMON de la vue Sync plutôt que la phase DISTRIBUTION : l'étape
+ * « Daemon » montre CE qu'elle attend, la distribution reste ce
+ * qu'elle était.
  */
 internal class EcouteurStatutLegacy(
     private val phases: ConteurPhasesSync,
@@ -320,7 +327,13 @@ internal class EcouteurStatutLegacy(
         dernierStatutMs = maintenant
         val description = evenement.description
         if (description.isBlank()) return
-        phases.progression(SyncPhase.DISTRIBUTION, element = description)
+        val phase =
+            if (description.contains("daemon", ignoreCase = true)) {
+                SyncPhase.DAEMON
+            } else {
+                SyncPhase.DISTRIBUTION
+            }
+        phases.progression(phase, element = description)
     }
 
     private companion object {

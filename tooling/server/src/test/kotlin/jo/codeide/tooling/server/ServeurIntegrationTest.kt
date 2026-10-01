@@ -226,9 +226,19 @@ class ServeurIntegrationTest {
             "la connexion au daemon devait être annoncée avant la première sortie",
             statuts.any { it.message == "connexion au daemon Gradle…" },
         )
+        // v0.45.2 : la conclusion de la connexion vient du FAIT Tooling API
+        // (« Connecting to Gradle Daemon », capté par
+        // EcouteurStatutDaemonBuild) — plus de mesure d'objet en cache.
         assertTrue(
-            "la connexion devait être CONCLUE avec sa durée",
+            "la connexion devait être CONCLUE avec sa durée réelle",
             statuts.any { it.message.startsWith("daemon Gradle connecté (") },
+        )
+        // v0.45.2 (décomposition honnête) : le signalement de terrain disait
+        // « BUILD SUCCESSFUL in 10s » au bout de 200-300 s sans explication —
+        // la console conclut désormais sur les TROIS durées nommées.
+        assertTrue(
+            "la décomposition des durées devait conclure le build : ${statuts.map { it.message }}",
+            statuts.any { it.message.startsWith("build Gradle : ") && it.message.contains("total : ") },
         )
         // Ordre : les statuts précèdent la PREMIÈRE ligne de sortie du build
         // (la fenêtre pré-tâches est visible AVANT que Gradle n'écrive).
