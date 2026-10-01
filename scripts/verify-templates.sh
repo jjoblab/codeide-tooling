@@ -13,7 +13,7 @@
 #   CODEIDE_JDK17, CODEIDE_JDK21, CODEIDE_MAVEN, CODEIDE_TRAVAIL,
 #   CODEIDE_ANDROID_SDK (modèles android-app, défaut /home/z/android-sdk)
 # Filtre optionnel (expression rationnelle sur l'identifiant de combinaison) :
-#   CODEIDE_COMBINAISONS='^(sb|kmp|andr)' — vérification ciblée ou par tranches ;
+#   CODEIDE_COMBINAISONS='^(gp|lib|andr)' — vérification ciblée ou par tranches ;
 #   les combinaisons déjà vérifiées (marqueur .verifie + empreinte des assets)
 #   sont sautées à chaque relance, la reprise est donc gratuite.
 # Le tableau « combinaison → résultat » est affiché en fin d'exécution ;
@@ -134,6 +134,30 @@ nouveaux = [
      "My Cool App!", "Description hostile </project> & $x$", {"appName": "My Cool App"}),
 ]
 
+# — Modèles v0.44.0 (phase 3 du roadmap) : variantes de projet Android
+# (projectType / language), bibliothèque .aar et plugin Gradle.
+# build : gradle-android (variantes), gradle-android-lib (aar),
+# gradle-plugin (kotlin-dsl + testkit).
+phase3 = [
+    ("andr-vide-java", "android-app", "gradle-android", "21", True, True, "en", "none",
+     "Java App", "", {"appName": "JavaApp", "projectType": "empty-activity", "language": "java"}),
+    ("andr-sansact-fr", "android-app", "gradle-android", "21", True, True, "fr", "none",
+     "Fondations", "", {"appName": "Fondations", "projectType": "no-activity", "language": "kotlin"}),
+    ("andr-tiroir-fr", "android-app", "gradle-android", "21", True, True, "fr", "none",
+     "App Tiroir", "", {"appName": "Mon Tiroir & Co", "projectType": "basic-activity", "language": "kotlin"}),
+    ("andr-tiroir-java-en", "android-app", "gradle-android", "21", False, False, "en", "mit",
+     "Drawer Java!", "Description hostile </project> & $x$",
+     {"appName": "My Cool App!", "projectType": "basic-activity", "language": "java"}),
+    ("lib-fr", "android-library", "gradle-android-lib", "21", True, True, "fr", "none",
+     "Bibliotheque Android", "Une bibliothèque de test", {"appName": "MaBibliotheque"}),
+    ("lib-en-min", "android-library", "gradle-android-lib", "21", False, False, "en", "apache-2.0",
+     "Utils Kit!", "", {"appName": "Utils Kit!"}),
+    ("gp-fr", "gradle-plugin", "gradle-plugin", "21", True, True, "fr", "none",
+     "Mon Plugin Salutations", "Un plugin de démonstration", {}),
+    ("gp-en-min", "gradle-plugin", "gradle-plugin", "21", False, False, "en", "mit",
+     "Build Utils 2026", "", {}),
+]
+
 # Filtre optionnel de combinaisons (expression rationnelle sur l'identifiant) :
 # CODEIDE_COMBINAISONS='^(sb|kmp|andr)' ne vérifie que les nouveaux modèles,
 # utile pour une vérification ciblée ou une exécution par tranches.
@@ -143,6 +167,7 @@ if FILTRE:
     _motif = _re.compile(FILTRE)
     combos = [c for c in combos if _motif.search(c[0])]
     nouveaux = [c for c in nouveaux if _motif.search(c[0])]
+    phase3 = [c for c in phase3 if _motif.search(c[0])]
 
 entrees = []
 tsv = []
@@ -181,7 +206,7 @@ for (cid, template, type_, build, jdk, tests, wrapper, langue, licence, nom, des
         "app" if type_ == "application" else "lib",
     ]))
 
-for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixes) in nouveaux:
+for (cid, template, build, jdk, tests, wrapper, langue, licence, nom, desc, fixes) in nouveaux + phase3:
     parametres = dict(fixes)
     manuels = list(fixes)
     parametres["includeTests"] = "true" if tests else "false"
@@ -218,7 +243,7 @@ PY
 # 2. Génération sur disque (harnais JVM — ADR 0019).
 # ---------------------------------------------------------------------------
 note "Génération des projets dans $TRAVAIL/modeles …"
-(cd "$RACINE" && ./gradlew -q :tools:generateur:run \
+(cd "$RACINE" && JAVA_HOME="$JDK21" ./gradlew -q :tools:generateur:run \
     "--args=--assets $RACINE/app/src/main/assets --sortie $TRAVAIL/modeles --combos $TRAVAIL/combos.json --annee 2026 --auteur CodeIDE --generateur 0.10.0")
 
 # ---------------------------------------------------------------------------
@@ -443,7 +468,8 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
             ;;
         gradle-android)
             # Android app : assembleDebug + tests unitaires de :app avec le SDK
-            # local (CODEIDE_ANDROID_SDK), APK contrôlé (ADR 0075).
+            # local (CODEIDE_ANDROID_SDK), APK contrôlé (ADR 0075). Phase 3 :
+            # contrôle aussi la variante (langage, type de projet).
             cmd=$(gradle_cmd_pour "$projet")
             if [ ! -d "$SDK_ANDROID/platforms" ]; then
                 erreur="SDK Android introuvable (CODEIDE_ANDROID_SDK)"
@@ -458,6 +484,57 @@ while IFS=$'\t' read -r cid template type_ build jdk tests wrapper langue licenc
                     erreur="gradle (testDebugUnitTest)"
                 elif ! ls "$projet"/app/build/test-results/testDebugUnitTest/TEST-*.xml >/dev/null 2>&1; then
                     erreur="résultats de tests Android absents"
+                fi
+            fi
+            # Variante Java : aucune source .kt ne doit exister.
+            if [ -z "$erreur" ] && [[ "$projet" == *-java* ]] && find "$projet/app/src" -name "*.kt" | grep -q .; then
+                erreur="sources .kt inattendues (variante Java)"
+            fi
+            # Variante sans activité : aucun MainActivity ne doit exister.
+            if [ -z "$erreur" ] && [[ "$projet" == *sansact* ]] && find "$projet/app/src" -name "MainActivity.*" | grep -q .; then
+                erreur="MainActivity inattendu (variante sans activité)"
+            fi
+            # Variante tiroir : le menu du tiroir doit exister.
+            if [ -z "$erreur" ] && [[ "$projet" == *tiroir* ]] && [ ! -f "$projet/app/src/main/res/menu/tiroir.xml" ]; then
+                erreur="menu du tiroir absent"
+            fi
+            ;;
+        gradle-android-lib)
+            # Bibliothèque Android (phase 3) : :library:assembleRelease produit
+            # le .aar, tests unitaires du module — aucun APK attendu.
+            cmd=$(gradle_cmd_pour "$projet")
+            if [ ! -d "$SDK_ANDROID/platforms" ]; then
+                erreur="SDK Android introuvable (CODEIDE_ANDROID_SDK)"
+            elif [ -z "$cmd" ]; then
+                erreur="ni wrapper ni Gradle système"
+            elif ! (cd "$projet" && JAVA_HOME="$jdk_home" ANDROID_HOME="$SDK_ANDROID" "$cmd" --no-daemon --console=plain -q :library:assembleRelease >/dev/null 2>"$TRAVAIL/$cid.log"); then
+                erreur="gradle (assembleRelease aar)"
+            elif [ ! -f "$projet/library/build/outputs/aar/library-release.aar" ]; then
+                erreur="AAR de release absent"
+            elif [ "$tests" = "tests" ]; then
+                if ! (cd "$projet" && JAVA_HOME="$jdk_home" ANDROID_HOME="$SDK_ANDROID" "$cmd" --no-daemon --console=plain -q :library:testDebugUnitTest >/dev/null 2>>"$TRAVAIL/$cid.log"); then
+                    erreur="gradle (testDebugUnitTest lib)"
+                elif ! ls "$projet"/library/build/test-results/testDebugUnitTest/TEST-*.xml >/dev/null 2>&1; then
+                    erreur="résultats de tests bibliothèque absents"
+                fi
+            fi
+            ;;
+        gradle-plugin)
+            # Plugin Gradle (phase 3) : build (validatePlugins inclus) +
+            # tests ProjectBuilder ; publication maven locale et marqueur
+            # de plugin contrôlés quand les tests sont demandés.
+            cmd=$(gradle_cmd_pour "$projet")
+            if [ -z "$cmd" ]; then
+                erreur="ni wrapper ni Gradle système"
+            elif ! (cd "$projet" && JAVA_HOME="$jdk_home" "$cmd" --no-daemon --console=plain -q build >/dev/null 2>"$TRAVAIL/$cid.log"); then
+                erreur="gradle (build plugin)"
+            elif [ "$tests" = "tests" ] && [ ! -f "$projet/build/reports/tests/test/index.html" ]; then
+                erreur="rapport de tests plugin absent"
+            elif [ "$tests" = "tests" ]; then
+                if ! (cd "$projet" && JAVA_HOME="$jdk_home" "$cmd" --no-daemon --console=plain -q publishToMavenLocal >/dev/null 2>>"$TRAVAIL/$cid.log"); then
+                    erreur="gradle (publishToMavenLocal)"
+                elif ! ls "$HOME"/.m2/repository/com/example/*/*.gradle.plugin*/*/*.pom >/dev/null 2>&1; then
+                    erreur="marqueur de plugin non publié"
                 fi
             fi
             ;;
