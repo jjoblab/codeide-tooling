@@ -14,13 +14,17 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
 import java.util.UUID
@@ -47,7 +51,10 @@ import java.util.UUID
  *
  * Nettoyage SYNCHRONE dans les terminaisons (leçon T2 : tout appel
  * suspendu depuis une coroutine annulée ne revient pas) : `kill`,
- * `fermer`, `fermerSession` ne suspendent jamais.
+ * `fermer`, `fermerSession` ne suspendent jamais — seule la VIDANGE
+ * des collecteurs de sorties d'une tentative manquée suspend (bornée
+ * à [FENETRE_VIDANGE_SORTIES_MS], sous [NonCancellable] : appelée
+ * depuis une coroutine possiblement déjà annulée).
  *
  * @param fabriqueCommande construit la ligne de commande du process —
  * couture du bout-en-bout §7.4 (le test relance le VRAI orchestrateur
@@ -248,7 +255,7 @@ class DaemonManager
             // ou échoue avant de se connecter s'explique LUI-MÊME sur stderr
             // (règle 14, ADR 0040) — journalisées sous le tag dédié dès leur
             // émission, session ou pas.
-            brancherSorties(process, porteeTentative)
+            val collecteurs = brancherSorties(process, porteeTentative)
 
             val session: SessionTooling
             try {
@@ -258,7 +265,7 @@ class DaemonManager
                 // (hôte JVM de test, canal NIO interruptible) : tentative
                 // consommable (IOException), le process mort seul est
                 // nettoyé tout de suite.
-                nettoyerApresConnexionManquee(process, hote, porteeTentative)
+                nettoyerApresConnexionManquee(process, hote, porteeTentative, collecteurs)
                 throw IOException(
                     "orchestrateur silencieux à la connexion (délai de $FENETRE_CONNEXION_MS ms)",
                     delai,
@@ -266,22 +273,22 @@ class DaemonManager
             } catch (refus: EchecHandshakeClient) {
                 // Secret ou version refusés : définitif — remonte tel quel à
                 // la boucle (qui épuisera sans relancer).
-                nettoyerApresConnexionManquee(process, hote, porteeTentative)
+                nettoyerApresConnexionManquee(process, hote, porteeTentative, collecteurs)
                 throw refus
             } catch (annulation: CancellationException) {
                 // Annulation de la surveillance elle-même (arreter/portée
                 // hôte morte) : TOUJOURS relancée telle quelle (règle 6).
-                nettoyerApresConnexionManquee(process, hote, porteeTentative)
+                nettoyerApresConnexionManquee(process, hote, porteeTentative, collecteurs)
                 throw annulation
             } catch (silencieux: IOException) {
                 // Échec de connexion typé par l'hôte production (accept non
                 // interruptible réveillé, ADR 0061) : nettoyage puis remontée
                 // TELLE QUELLE — le message est déjà précis, la boucle
                 // consomme une tentative comme un lancement impossible.
-                nettoyerApresConnexionManquee(process, hote, porteeTentative)
+                nettoyerApresConnexionManquee(process, hote, porteeTentative, collecteurs)
                 throw silencieux
             } catch (perdu: Throwable) {
-                nettoyerApresConnexionManquee(process, hote, porteeTentative)
+                nettoyerApresConnexionManquee(process, hote, porteeTentative, collecteurs)
                 throw IOException("aucune connexion de l'orchestrateur : ${perdu.message}", perdu)
             }
 
@@ -314,29 +321,55 @@ class DaemonManager
          * porte les lignes de l'orchestrateur, stdout les rares messages
          * JVM (démarrage impossible…), les deux rejoignent le journal
          * applicatif sous le tag dédié, la fenêtre de connexion comprise.
+         *
+         * @return les collecteurs lancés — [nettoyerApresConnexionManquee]
+         * les VIDANGE avant d'annuler la portée : une ligne déjà émise
+         * pendant la fenêtre de connexion explique l'échec, elle ne doit
+         * pas mourir de la course entre annulation et mise en file du
+         * collecteur sur le dispatcheur.
          */
         private fun brancherSorties(
             process: ManagedProcess,
             portee: CoroutineScope,
-        ) {
-            process
-                .stderrLines()
-                .onEach { ligne -> journal.w(TAG_PROCESSUS) { ligne } }
-                .launchIn(portee)
-            process
-                .stdoutLines()
-                .onEach { ligne -> journal.i(TAG_PROCESSUS) { ligne } }
-                .launchIn(portee)
-        }
+        ): List<Job> =
+            listOf(
+                process
+                    .stderrLines()
+                    .onEach { ligne -> journal.w(TAG_PROCESSUS) { ligne } }
+                    .launchIn(portee),
+                process
+                    .stdoutLines()
+                    .onEach { ligne -> journal.i(TAG_PROCESSUS) { ligne } }
+                    .launchIn(portee),
+            )
 
-        /** Nettoyage synchrone d'une tentative sans connexion établie. */
-        private fun nettoyerApresConnexionManquee(
+        /**
+         * Nettoyage d'une tentative sans connexion établie : tue le process,
+         * referme l'écoute, VIDANGE les collecteurs de sorties, puis annule
+         * la portée.
+         *
+         * La vidange borne une course observée en CI (2026-10-01, runner à
+         * cœurs comptés) : un échec de connexion levé sans la moindre
+         * suspension laissait l'annulation immédiate de la portée devancer
+         * la simple MISE EN FILE du collecteur sur le dispatcheur — la
+         * ligne de stderr mourait EN VOL, échec muet : exactement le bug
+         * v0.35.0 qu'ADR 0061 devait fermer. [NonCancellable] : appelée
+         * depuis une coroutine possiblement déjà annulée (leçon T2), la
+         * vidange ne suspend jamais sur une annulation déjà consommée.
+         */
+        private suspend fun nettoyerApresConnexionManquee(
             process: ManagedProcess,
             hote: HoteSocketTooling,
             portee: CoroutineScope,
+            collecteurs: List<Job>,
         ) {
             process.kill(force = true)
             hote.fermer()
+            withContext(NonCancellable) {
+                withTimeoutOrNull(FENETRE_VIDANGE_SORTIES_MS) {
+                    collecteurs.joinAll()
+                }
+            }
             portee.cancel()
         }
 
@@ -399,8 +432,7 @@ class DaemonManager
             /** Arguments invalides du process (ServerMain.CODE_ARGUMENTS). */
             const val CODE_ARGUMENTS_INVALIDES = 2
 
-            /**
-             * Fenêtre d'attente de la connexion de l'orchestrateur,
+            /** Fenêtre d'attente de la connexion de l'orchestrateur,
              * lancement de la JVM compris : un démarrage à froid du JDK sur
              * appareil dépasse le délai protocole de 10 s (§7.5, dimensionné
              * pour le seul connect de l'orchestrateur — l'écoute existe
@@ -410,6 +442,16 @@ class DaemonManager
              * repart sur un secret frais.
              */
             const val FENETRE_CONNEXION_MS: Long = 30_000L
+
+            /**
+             * Fenêtre de vidange des collecteurs de sorties à la fin d'une
+             * tentative sans connexion (millisecondes) : les lignes déjà
+             * émises rejoignent le journal (garantie ADR 0061 — c'est le
+             * stderr qui explique un échec de connexion) ; un lecteur
+             * bloqué ne retarde jamais la relance au-delà — le process est
+             * déjà tué, le lecteur réel referme son tuyau à EOF.
+             */
+            const val FENETRE_VIDANGE_SORTIES_MS: Long = 250L
 
             /** Attente initiale entre deux relances (1 s). */
             const val DELAI_RELANC_E_MS = 1_000L
