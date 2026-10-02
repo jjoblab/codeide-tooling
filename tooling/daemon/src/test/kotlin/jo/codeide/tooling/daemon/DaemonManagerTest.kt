@@ -147,6 +147,29 @@ class DaemonManagerTest {
         }
 
     @Test
+    fun `une ligne de stderr en vol pendant la fenetre survit a l annulation de la portee`() =
+        runBlocking {
+            // Régression CI (2026-10-01, runner à cœurs comptés) : un échec de
+            // connexion levé SANS la moindre suspension laissait l'annulation
+            // immédiate de la portée devancer la mise en file du collecteur
+            // sur le dispatcheur — la ligne mourait EN VOL, échec muet. Le
+            // lecteur ci-dessous ne publie sa ligne qu'après 50 ms : SANS la
+            // vidange bornée avant l'annulation, l'attendreQue échoue toujours
+            // (le délai est incontestablement plus long que la microseconde
+            // du lancement à l'échec) ; AVEC, la ligne rejoint le journal à
+            // coup sûr, la course de dispatcheur ne décide plus de rien.
+            hote.echecConnexion =
+                java.io.IOException("orchestrateur silencieux à la connexion (délai de 30000 ms)")
+            lanceur.fabrique = { ProcessusStderrDiffere(delaiMs = 50) }
+            nouveauDaemon().demarrerEnTest()
+
+            attendreQue {
+                journal.entries.any { it.tag == "gradle-server" && it.message.contains("cause terrain différé") }
+            }
+            attendreQue { lanceur.lancements.size >= 2 }
+        }
+
+    @Test
     fun `un echec de connexion IO de l hote est consomme puis epuise les tentatives`() =
         runBlocking {
             // L'hôte production traduit le délai expiré en IOException typée
@@ -506,6 +529,41 @@ private class ProcessusMaitrise(
 
     override fun kill(force: Boolean) {
         tues += force
+        fin.complete(CODE_TUE)
+    }
+
+    private companion object {
+        const val CODE_TUE = 137
+    }
+}
+
+/**
+ * Process dont le flux stderr n'émet sa ligne qu'après un délai :
+ * réplique DÉTERMINISTE de la course CI (2026-10-01) — le collecteur
+ * est garanti NON ENCORE PUBLIÉ (suspendu dans son délai interne) au
+ * moment où la tentative échoue ; sans vidange bornée avant
+ * l'annulation, la ligne meurt en vol à tous les coups.
+ */
+private class ProcessusStderrDiffere(
+    private val delaiMs: Long,
+) : ManagedProcess {
+    private val fin = CompletableDeferred<Int>()
+
+    override val pid: Int = 42_426
+
+    override fun isAlive(): Boolean = !fin.isCompleted
+
+    override fun stdoutLines(): Flow<String> = emptyList<String>().asFlow()
+
+    override fun stderrLines(): Flow<String> =
+        kotlinx.coroutines.flow.flow {
+            kotlinx.coroutines.delay(delaiMs)
+            emit("échec différé : cause terrain différé")
+        }
+
+    override suspend fun awaitExit(): Int = fin.await()
+
+    override fun kill(force: Boolean) {
         fin.complete(CODE_TUE)
     }
 
