@@ -75,11 +75,12 @@ internal class BuildHandler(
                 tasks = requete.tasks,
             ),
         )
-        // v0.45.1 (affichage immédiat, parité Android Studio) : statut
-        // textuel « Exécution des tâches » dès l'acceptation (cf.
+        // v0.45.1 : statut textuel dès l'acceptation (cf.
         // PublicateurProgressionBuild.statut) — la console ne reste plus
-        // AVEUGLE entre le lancement et la première ligne de tâche.
-        publications.statut(requete.buildId, "Exécution des tâches : ${requete.tasks.joinToString()}")
+        // AVEUGLE avant la première ligne de tâche. v0.46.0 : format
+        // d'Android Studio, le VRAI sélecteur Gradle s'y lit (celui que
+        // le terminal attend).
+        publications.statut(requete.buildId, enTeteExecutionTaches(requete))
         // v0.39.1 (correctif n°4) : conclusion extraite du stdout au fil de
         // l'eau (synthèse « N actionable tasks » + durée RAPPORTÉE PAR
         // GRADLE « in Xs », v0.45.2) — lue à la fin pour remplir
@@ -134,6 +135,17 @@ internal class BuildHandler(
             }
         }
     }
+
+    /**
+     * « Exécution des tâches : [:app:assembleDebug] dans le projet MonIP »
+     * (v0.46.0 — parité fenêtre Build d'Android Studio) : le VRAI sélecteur
+     * Gradle se lit dans la console, celui que le terminal attend (retour
+     * terrain : « Cannot locate tasks that match 'task:assembleDebug' » —
+     * la feuille de tâches de l'app lance `:module:tâche`).
+     */
+    private fun enTeteExecutionTaches(requete: BuildRequest): String =
+        "Exécution des tâches : [${requete.tasks.joinToString()}] " +
+            "dans le projet ${File(requete.projectDir).name}"
 
     /**
      * Fenêtre de connexion au daemon (v0.45.2 — corrigée sur retour de
