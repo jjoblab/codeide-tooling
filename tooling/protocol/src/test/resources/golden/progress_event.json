@@ -1,1 +1,1 @@
-{"type":"progress_event","id":"evt-43","protocolVersion":5,"buildId":"build-7","message":"Téléchargement kotlin-stdlib-2.2.10.jar","telechargement":{"element":"kotlin-stdlib-2.2.10.jar","octetsRecus":1769000,"octetsTotal":1769000,"termine":true,"dureeMs":850,"compteur":3}}
+{"type":"progress_event","id":"evt-43","protocolVersion":6,"buildId":"build-7","message":"Téléchargement kotlin-stdlib-2.2.10.jar","telechargement":{"element":"kotlin-stdlib-2.2.10.jar","octetsRecus":1769000,"octetsTotal":1769000,"termine":true,"dureeMs":850,"compteur":3}}

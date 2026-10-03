@@ -35,8 +35,16 @@ public object GradleProtocol {
      * qui n'a pas lieu n'est plus émise du tout. Le catalogue affiché est
      * construit pour la sync en cours (étape non concernée = absente de la
      * liste). Cf. ADR 0073 à venir.
+     *
+     * v7 (ADR 0079, v0.48.0) : [SyncOutput] — une ligne de sortie
+     * stdout/stderr de la synchronisation voyage avec le dossier du projet
+     * (plus de `buildId` de requête sync jeté à la réception) ; la console
+     * Sync affiche le vrai flux de Gradle comme la fenêtre Sync d'Android
+     * Studio. Un nouveau TYPE d'événement n'est PAS décodable par un client
+     * antérieur (le discriminant `type` échoue avant `ignoreUnknownKeys`)
+     * : la montée à 6 refuse le handshake croisé avec un message clair.
      */
-    public const val PROTOCOL_VERSION: Int = 5
+    public const val PROTOCOL_VERSION: Int = 6
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"

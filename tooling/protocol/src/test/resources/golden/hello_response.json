@@ -1,1 +1,1 @@
-{"type":"hello_response","id":"evt-43","protocolVersion":5,"serverVersion":"0.26.0","gradleToolingApiVersion":"9.7.1","supportedFeatures":["build","sync","tasks"]}
+{"type":"hello_response","id":"evt-43","protocolVersion":6,"serverVersion":"0.26.0","gradleToolingApiVersion":"9.7.1","supportedFeatures":["build","sync","tasks"]}
