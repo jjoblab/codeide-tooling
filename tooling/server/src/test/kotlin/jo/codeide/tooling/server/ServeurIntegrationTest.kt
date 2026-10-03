@@ -466,6 +466,14 @@ class ServeurIntegrationTest {
         )
         val resultatSync = app.attendre(DELAI_BUILD, SyncResult::class)
         assertTrue("pré-condition : sync réussie", resultatSync.succeeded)
+        // v0.47.0 : le résultat PORTE les tâches résolues par l'action —
+        // le client arme le bouton Tâches sur CE fait, sans second
+        // aller-retour de listage.
+        assertTrue(
+            "le SyncResult devait porter les tâches résolues : " +
+                resultatSync.taches.joinToString { it.path },
+            resultatSync.taches.any { it.path.endsWith("saluer") },
+        )
 
         val identifiant = nouvelId()
         val debut = System.nanoTime()
@@ -483,6 +491,13 @@ class ServeurIntegrationTest {
         assertTrue(
             "les tâches du cache devaient être servies : ${taches.tasks.joinToString { it.path }}",
             taches.tasks.any { it.path.endsWith("saluer") },
+        )
+        // v0.47.0 : le cache et le champ porté par le résultat sont la
+        // MÊME résolution — mêmes chemins, même ordre.
+        assertEquals(
+            "les tâches du SyncResult et du listage devaient coïncider",
+            resultatSync.taches,
+            taches.tasks,
         )
         // Depuis le cache : AUCUN aller-retour de modèle (une résolution
         // réelle prend des secondes, même daemon chaud — le cache répond

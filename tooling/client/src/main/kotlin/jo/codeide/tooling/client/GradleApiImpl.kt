@@ -551,6 +551,21 @@ class GradleApiImpl
                             reussie = reponse.succeeded,
                             dureeMs = reponse.durationMs,
                             messageEchec = reponse.failureMessage,
+                            // v0.47.0 : les tâches résolues par l'action
+                            // TRAVERSENT avec le résultat — l'UI arme le
+                            // bouton Tâches SUR CE FAIT, sans second
+                            // aller-retour de listage (champ optionnel :
+                            // un serveur antérieur ne l'envoie pas, la
+                            // liste reste vide et l'appelant retombe sur
+                            // `taches()` — le cache vient d'être déposé).
+                            taches =
+                                reponse.taches.map { tache: TaskInfo ->
+                                    InfoTache(
+                                        chemin = tache.path,
+                                        groupe = tache.group,
+                                        nomAffiche = tache.displayName,
+                                    )
+                                },
                         ),
                     )
                 }
