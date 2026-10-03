@@ -68,6 +68,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -270,10 +271,16 @@ class GradleApiImpl
          * v0.49.0 (ADR 0080) : la pompe unique devient un LECTEUR qui ne
          * suspend JAMAIS hors de la lecture — pong mis à jour en chemin
          * rapide, familles build/sync routées vers DEUX voies ordonnées aux
-         * consommateurs dédiés, événements légers traités en ligne. La
-         * portée vit sur [DISPATCH_POMPE], une voie DÉDIÉE de fils : ni la
-         * saturation du dispatcheur par défaut (classpath LSP, surlignage)
-         * ni un canal de console plein ne peuvent plus retarder les pongs.
+         * consommateurs dédiés, événements légers traités en ligne.
+         *
+         * v0.50.0 (ADR 0081) : la session réelle lit dans UN FIL DÉDIÉ hors
+         * dispatcheurs ([SessionTooling.acheminerVia]) — le router (non
+         * suspendant) s'exécute au POINT DE LECTURE, dans le fil : plus
+         * aucun changement de contexte de scheduler entre l'arrivée des
+         * octets et le routage. La collecte du flux ne route PLUS (le fil
+         * l'a fait avant son `trySend`) — elle reste le signal de fin de
+         * flux et son finally garde tout le ménage. Les sessions factices
+         * ne supportent pas le fil : la collecte route, comme avant.
          */
         fun ouvrirSession(nouvelleSession: SessionTooling) {
             fermerSession()
@@ -287,9 +294,41 @@ class GradleApiImpl
             val voieSync = Channel<ToolingEvent>(Channel.UNLIMITED)
             voieBuildCourante = voieBuild
             voieSyncCourante = voieSync
+            // v0.50.0 : le router est remis à la session réelle — exécuté par
+            // son FIL de lecture, au vrai point de réception (pong, latence
+            // de transport, voies) ; les factices routent via la collecte.
+            val routeParLeFil =
+                nouvelleSession.acheminerVia { evenement ->
+                    router(evenement, voieBuild, voieSync)
+                }
+            // Consommateurs des voies : les envois suspendants vers les
+            // canaux aval vivent ICI, isolés du lecteur — une voie pleine
+            // retarde SA famille, jamais la santé ni l'autre famille. Une
+            // pan imprévue d'un événement ne tue pas la voie (journalisée,
+            // l'événement suivant la reprend). Lancés AVANT le lecteur : le
+            // `finally` de celui-ci joint leurs Jobs pour drainer les voies
+            // avant de conclure (v0.50.0).
+            val travailleurBuild =
+                portee.launch {
+                    for (evenement in voieBuild) {
+                        profondeurBuild.decrementAndGet()
+                        traiterSansPanne(evenement) { pomperBuild(it) }
+                    }
+                }
+            val travailleurSync =
+                portee.launch {
+                    for (evenement in voieSync) {
+                        profondeurSync.decrementAndGet()
+                        traiterSansPanne(evenement) { pomperSyncFamille(it) }
+                    }
+                }
             portee.launch {
                 try {
-                    nouvelleSession.evenements.collect { router(it, voieBuild, voieSync) }
+                    nouvelleSession.evenements.collect {
+                        if (!routeParLeFil) {
+                            router(it, voieBuild, voieSync)
+                        }
+                    }
                 } finally {
                     // Fin du flux = déconnexion (EOF ou perte, §5.2/§7.5) —
                     // MAIS seulement si cette session est TOUJOURS la
@@ -300,6 +339,22 @@ class GradleApiImpl
                     // ferme la précédente »).
                     voieBuild.close()
                     voieSync.close()
+                    // v0.50.0 : les lignes DÉJÀ ROUTÉES finissent leur chemin
+                    // AVANT la conclusion — sans cette fenêtre, la rupture
+                    // referme le canal de sortie pendant que la dernière
+                    // ligne dort encore dans sa voie : elle meurt au `send`
+                    // (course révélée par le test de chaos « une déconnexion
+                    // échoue les builds en cours » sur machine chargée : le
+                    // consommateur n'avait pas été schedulé entre le routage
+                    // et la rupture). Bornée : une console aval morte ne
+                    // retarde jamais la conclusion au-delà de la fenêtre —
+                    // au délai, on rompt comme avant. Sur remplacement de
+                    // session les consommateurs sont déjà annulés : le join
+                    // rend la main immédiatement.
+                    withTimeoutOrNull(FENETRE_DRAINAGE_VOIES_MS) {
+                        travailleurBuild.join()
+                        travailleurSync.join()
+                    }
                     if (session === nouvelleSession) {
                         connexion.value = EtatConnexion.DECONNECTEE
                         session = null
@@ -309,23 +364,6 @@ class GradleApiImpl
                         rompreBuildsEnCours()
                         rompreSyncEnCours()
                     }
-                }
-            }
-            // Consommateurs des voies : les envois suspendants vers les
-            // canaux aval vivent ICI, isolés du lecteur — une voie pleine
-            // retarde SA famille, jamais la santé ni l'autre famille. Une
-            // pan imprévue d'un événement ne tue pas la voie (journalisée,
-            // l'événement suivant la reprend).
-            portee.launch {
-                for (evenement in voieBuild) {
-                    profondeurBuild.decrementAndGet()
-                    traiterSansPanne(evenement) { pomperBuild(it) }
-                }
-            }
-            portee.launch {
-                for (evenement in voieSync) {
-                    profondeurSync.decrementAndGet()
-                    traiterSansPanne(evenement) { pomperSyncFamille(it) }
                 }
             }
         }
@@ -1332,6 +1370,14 @@ class GradleApiImpl
 
             /** Profondeur d'une voie au-delà de laquelle elle est signalée. */
             const val SEUIL_ALERTE_VOIE = 2_048L
+
+            /**
+             * Fenêtre bornée de drainage des voies à la fin du flux
+             * (v0.50.0) : les lignes déjà routées finissent leur chemin avant
+             * la conclusion des builds — une console aval morte ne retarde
+             * jamais la conclusion au-delà.
+             */
+            const val FENETRE_DRAINAGE_VOIES_MS: Long = 2_000L
 
             /** Bornage du débit des avertissements de voie (5 s). */
             const val INTERVALLE_ALERTE_VOIE_MS = 5_000L

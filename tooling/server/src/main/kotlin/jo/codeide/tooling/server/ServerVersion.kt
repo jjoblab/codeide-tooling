@@ -9,10 +9,11 @@ package jo.codeide.tooling.server
  * version de livraison de chaque étape (ADR 0040).
  */
 public object ServerVersion {
-    /** Version courante de l'orchestrateur (v0.49.0 : fil écrivain unique
-     * + file prioritaire pong — ADR 0080 ; v0.35.4 : conteneur vertical
-     * unique dans les cartes des sections des Paramètres — ADR 0064 ;
-     * v0.35.3 : tolérance au démontage du tuyau + garde-fou de
+    /** Version courante de l'orchestrateur (v0.50.0 : alignée sur la
+     * livraison du fil de lecture dédié côté app — ADR 0081, l'orchestrateur
+     * lui-même est inchangé (fil écrivain v0.49.0, ADR 0080 ; v0.35.4 :
+     * conteneur vertical unique dans les cartes des sections des Paramètres —
+     * ADR 0064 ; v0.35.3 : tolérance au démontage du tuyau + garde-fou de
      * supervision — ADR 0063). */
-    public const val CURRENT: String = "0.49.0"
+    public const val CURRENT: String = "0.50.0"
 }

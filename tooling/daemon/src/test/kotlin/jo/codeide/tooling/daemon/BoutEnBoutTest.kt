@@ -19,6 +19,7 @@ import jo.codeide.tooling.testing.FixturesGradle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -43,6 +44,7 @@ import java.nio.channels.Channels
 import java.nio.channels.ServerSocketChannel
 import java.nio.channels.SocketChannel
 import java.util.concurrent.CopyOnWriteArrayList
+import kotlin.concurrent.thread
 
 /**
  * BOUT-EN-BOUT RÉEL du tooling (§7.4) : le [DaemonManager] lance le VRAI
@@ -347,13 +349,18 @@ internal class HoteSocketJvm(
 
 /**
  * Session réelle côté JVM de test : miroir de `SessionSocketAndroid`
- * (écritures sérialisées par verrou, flux froid, EOF = complétion).
+ * (écritures sérialisées par verrou, LECTURE PAR FIL DÉDIÉ hors
+ * dispatcheurs v0.50.0 — le test bout-en-bout couvre le fil réel).
  */
 @Suppress("SwallowedException")
 internal class SessionSocketJvm(
     private val canal: SocketChannel,
 ) : SessionTooling {
     private val verrou = Mutex()
+
+    /** Chemin rapide installé par [acheminerVia] — appelé par le fil. */
+    @Volatile
+    private var cheminRapide: ((ToolingEvent) -> Unit)? = null
 
     override suspend fun envoyer(message: ProtocolMessage) {
         val charge = ProtocolJson.encoder(message).encodeToByteArray()
@@ -364,20 +371,40 @@ internal class SessionSocketJvm(
         }
     }
 
+    override fun acheminerVia(chemin: (ToolingEvent) -> Unit): Boolean {
+        cheminRapide = chemin
+        return true
+    }
+
     override val evenements: Flow<ToolingEvent> =
         flow {
-            try {
-                while (true) {
-                    val charge =
-                        withContext(Dispatchers.IO) {
-                            lireFrame(canal)
+            val bus = Channel<ToolingEvent>(Channel.UNLIMITED)
+            val fil =
+                thread(isDaemon = true, name = "tooling-lecteur") {
+                    try {
+                        while (true) {
+                            // Lecture DIRECTE dans le fil dédié (v0.50.0) :
+                            // réveil noyau, zéro ordonnancement coroutine.
+                            val charge = lireFrame(canal)
+                            val evenement =
+                                ProtocolJson.decoderEvenement(String(charge, Charsets.UTF_8))
+                            runCatching { cheminRapide?.invoke(evenement) }
+                            bus.trySend(evenement)
                         }
-                    emit(ProtocolJson.decoderEvenement(String(charge, Charsets.UTF_8)))
+                    } catch (fin: EOFException) {
+                        // Fin de session : le process a fermé le canal.
+                    } catch (fermee: IOException) {
+                        // Canal fermé (arrêt/démontage) : complétion, pas d'échec.
+                    } finally {
+                        bus.close()
+                    }
                 }
-            } catch (fin: EOFException) {
-                // Fin de session : le process a fermé le canal.
-            } catch (fermee: IOException) {
-                // Canal fermé (arrêt/démontage) : complétion, pas d'échec.
+            try {
+                // Le routage a déjà eu lieu dans le fil ; le flux ne reste
+                // que le signal de fin (collecte consommée pour la mémoire).
+                for (evenement in bus) emit(evenement)
+            } finally {
+                fil.interrupt()
             }
         }
 
