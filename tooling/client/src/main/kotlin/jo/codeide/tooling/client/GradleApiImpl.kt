@@ -57,6 +57,7 @@ import jo.codeide.tooling.protocol.ToolingEvent
 import jo.codeide.tooling.protocol.ToolingRequest
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
@@ -97,13 +98,16 @@ import javax.inject.Singleton
  * ping/pong (§5.4) — les pongs arrivent dans le flux d'événements pompé
  * ici, c'est donc cette classe qui tient le repère à jour.
  *
- * Exemption detekt ciblée (règle 16) : TooManyFunctions — les surcharges
- * viennent du contrat [GradleToolingRepository] (§5.3 du prompt Tooling),
- * le reste sont les traductions protocol → domaine et la plomberie de
- * session, chacune testée ; les découper en classes artificielles
- * casserait le dialogue requête/réponse qu'elles partagent.
+ * Exemption detekt ciblée (règle 16) : TooManyFunctions et LargeClass
+ * — les surcharges viennent du contrat [GradleToolingRepository] (§5.3 du
+ * prompt Tooling), le reste sont les traductions protocol → domaine et la
+ * plomberie de session, chacune testée ; les découper en classes
+ * artificielles casserait le dialogue requête/réponse qu'elles partagent.
+ * v0.49.0 (ADR 0080) : le routeur et les consommateurs de voies PARTAGENT
+ * l'état privé de la session (promesses, canaux, états) — les extraire
+ * exigerait d'exposer cet état, précisément ce que la classe borne.
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LargeClass")
 @Singleton
 class GradleApiImpl
     @Inject
@@ -221,12 +225,55 @@ class GradleApiImpl
         private var porteePompe: CoroutineScope? = null
 
         /**
+         * Voie BUILD ordonnée de la session courante (v0.49.0, ADR 0080) :
+         * le lecteur y dépose les événements de la famille build DANS
+         * l'ORDRE D'ARRIVÉE ; SON consommateur fait les envois suspendants
+         * vers les canaux aval — une console lente ne peut plus geler la
+         * lecture du socket (leçon v0.45.1 : « une pompe unique ne doit
+         * JAMAIS se bloquer » — elle ne le peut plus, par construction).
+         */
+        @Volatile
+        private var voieBuildCourante: Channel<ToolingEvent>? = null
+
+        /**
+         * Voie SYNC ordonnée de la session courante (v0.49.0) : la famille
+         * sync a SA voie — un canal flusSync plein ne retient PLUS les pongs
+         * ni les sorties de build (retour terrain v0.47/v0.48 : lignes en
+         * rafales 76 s après la fin du build, « orchestrateur muet »).
+         */
+        @Volatile
+        private var voieSyncCourante: Channel<ToolingEvent>? = null
+
+        /** Profondeur courante de la voie build (diagnostic v0.49.0). */
+        private val profondeurBuild =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+
+        /** Profondeur courante de la voie sync (diagnostic v0.49.0). */
+        private val profondeurSync =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+
+        /** Datation du dernier avertissement de voie saturée (débit borné). */
+        private val dernierAvertissementVoieMs =
+            java.util.concurrent.atomic
+                .AtomicLong(0L)
+
+        /**
          * Ouvre (ou remplace) la session — appelé par le daemon (G4).
          *
          * La session réelle lit un flux FROID sur socket : les frames entrent
          * dans le tampon de l'OS jusqu'à la première collecte — l'abonnement
          * du pompe ne peut rien perdre (contrairement à un flux chaud à rejeu
          * nul, dont les émissions pré-abonnement disparaîtraient).
+         *
+         * v0.49.0 (ADR 0080) : la pompe unique devient un LECTEUR qui ne
+         * suspend JAMAIS hors de la lecture — pong mis à jour en chemin
+         * rapide, familles build/sync routées vers DEUX voies ordonnées aux
+         * consommateurs dédiés, événements légers traités en ligne. La
+         * portée vit sur [DISPATCH_POMPE], une voie DÉDIÉE de fils : ni la
+         * saturation du dispatcheur par défaut (classpath LSP, surlignage)
+         * ni un canal de console plein ne peuvent plus retarder les pongs.
          */
         fun ouvrirSession(nouvelleSession: SessionTooling) {
             fermerSession()
@@ -234,27 +281,90 @@ class GradleApiImpl
             connexion.value = EtatConnexion.CONNECTEE
             // Repère initial du health check (§5.4) : voir [dernierPongMs].
             dernierPongMs.value = System.currentTimeMillis()
-            val portee = CoroutineScope(SupervisorJob())
+            val portee = CoroutineScope(SupervisorJob() + DISPATCH_POMPE)
             porteePompe = portee
+            val voieBuild = Channel<ToolingEvent>(Channel.UNLIMITED)
+            val voieSync = Channel<ToolingEvent>(Channel.UNLIMITED)
+            voieBuildCourante = voieBuild
+            voieSyncCourante = voieSync
             portee.launch {
                 try {
-                    nouvelleSession.evenements.collect { pomper(it) }
+                    nouvelleSession.evenements.collect { router(it, voieBuild, voieSync) }
                 } finally {
                     // Fin du flux = déconnexion (EOF ou perte, §5.2/§7.5) —
                     // MAIS seulement si cette session est TOUJOURS la
-                    // courante : le finally d'un pompe annulé (remplacement
+                    // courante : le finally d'un lecteur annulé (remplacement
                     // de session) s'exécute de façon asynchrone et ne doit
                     // pas casser l'état de celle qui l'a remplacée (course
                     // attrapée par le test « ouvrir une nouvelle session
                     // ferme la précédente »).
+                    voieBuild.close()
+                    voieSync.close()
                     if (session === nouvelleSession) {
                         connexion.value = EtatConnexion.DECONNECTEE
                         session = null
+                        voieBuildCourante = null
+                        voieSyncCourante = null
                         romprePromesses()
                         rompreBuildsEnCours()
                         rompreSyncEnCours()
                     }
                 }
+            }
+            // Consommateurs des voies : les envois suspendants vers les
+            // canaux aval vivent ICI, isolés du lecteur — une voie pleine
+            // retarde SA famille, jamais la santé ni l'autre famille. Une
+            // pan imprévue d'un événement ne tue pas la voie (journalisée,
+            // l'événement suivant la reprend).
+            portee.launch {
+                for (evenement in voieBuild) {
+                    profondeurBuild.decrementAndGet()
+                    traiterSansPanne(evenement) { pomperBuild(it) }
+                }
+            }
+            portee.launch {
+                for (evenement in voieSync) {
+                    profondeurSync.decrementAndGet()
+                    traiterSansPanne(evenement) { pomperSyncFamille(it) }
+                }
+            }
+        }
+
+        /**
+         * Signes vitaux de la pompe (v0.49.0, ADR 0080) : âge du dernier
+         * pong et profondeur des voies — le daemon les journalise quand il
+         * déclare l'orchestrateur muet : la ligne désigne le coupable
+         * (voies profondes = console lente côté app, voies vides + pong
+         * vieux = orchestrateur réellement mort).
+         */
+        fun signesVitaux(): String {
+            val agePong = (System.currentTimeMillis() - dernierPongMs.value).coerceAtLeast(0)
+            return "dernierPong=$agePong ms, voieBuild=${profondeurBuild.get()}, " +
+                "voieSync=${profondeurSync.get()}, session=${session != null}"
+        }
+
+        /**
+         * Traite un événement d'une voie SANS laisser une pan le tuer : la
+         * voie survit, l'événement fautif est journalisé — une pompe qui
+         * meurt en silence emporte la lecture du socket avec elle (retour
+         * terrain v0.48 : plus rien n'arrive, « muet », kill, relance).
+         */
+        private suspend fun traiterSansPanne(
+            evenement: ToolingEvent,
+            traitement: suspend (ToolingEvent) -> Unit,
+        ) {
+            try {
+                traitement(evenement)
+            } catch (annulation: kotlinx.coroutines.CancellationException) {
+                // L'annulation n'est PAS une pan : la relancer, sinon la
+                // voie survivrait à la fermeture de session (boucle de
+                // captures sans fin — attraper Throwable exige ce rejet).
+                throw annulation
+            } catch (t: Throwable) {
+                journal.e(
+                    TAG_POMPE,
+                    t,
+                ) { "pan de traitement d'un ${evenement::class.simpleName} : ${t.message}" }
             }
         }
 
@@ -291,6 +401,12 @@ class GradleApiImpl
             }
             porteePompe = null
             session = null
+            // v0.49.0 : les voies de la session morte ne se rejouent pas —
+            // les compteurs repartent à zéro pour la session suivante.
+            voieBuildCourante = null
+            voieSyncCourante = null
+            profondeurBuild.set(0L)
+            profondeurSync.set(0L)
             courante?.fermer()
             connexion.value = EtatConnexion.DECONNECTEE
             romprePromesses()
@@ -335,9 +451,6 @@ class GradleApiImpl
          * l'ordre de la console.
          */
         private suspend fun pomperSync(evenement: ToolingEvent) {
-            // v4 (§3.1) : tout événement de sync est un signe de vie — le
-            // délai d'INACTIVITÉ de [synchroniser] se réarme ici.
-            derniereActiviteSyncMs.set(System.currentTimeMillis())
             when (evenement) {
                 is SyncStarted -> {
                     flusSync.send(EvenementSyncFlux.Debut(projectDir = evenement.projectDir))
@@ -380,11 +493,11 @@ class GradleApiImpl
          * jamais.
          */
         private suspend fun pomperEtapeSync(evenement: SyncProgress) {
-            // v4 (§3.1) : une étape (même une progression d'octet) est un
-            // signe de vie — un téléchargement qui progresse ne meurt pas.
-            // v6 (prompt de suivi §2) : plus de champ `sautee` — une phase
-            // qui n'a pas lieu n'est pas émise par le serveur.
-            derniereActiviteSyncMs.set(System.currentTimeMillis())
+            // v4 (§3.1) puis v0.49.0 : le signe de vie est mesuré à la
+            // RÉCEPTION (routeur) ; il ne reste ici que la traversée du
+            // flux ordonné. v6 (prompt de suivi §2) : plus de champ
+            // `sautee` — une phase qui n'a pas lieu n'est pas émise par le
+            // serveur.
             flusSync.send(
                 EvenementSyncFlux.Etape(
                     EtapeSyncTooling(
@@ -409,7 +522,7 @@ class GradleApiImpl
          * signe de vie (le délai d'inactivité se réarme).
          */
         private suspend fun pomperSortieSync(evenement: SyncOutput) {
-            derniereActiviteSyncMs.set(System.currentTimeMillis())
+            // v0.49.0 : le signe de vie est mesuré à la RÉCEPTION (routeur).
             flusSync.send(
                 EvenementSyncFlux.Ligne(
                     LigneSortieSync(
@@ -493,27 +606,71 @@ class GradleApiImpl
         }
 
         /**
-         * Routage d'un événement entrant vers ses flux et promesses.
+         * Routage d'un événement À LA RÉCEPTION (v0.49.0, ADR 0080) : chemin
+         * RAPIDE du lecteur — ne suspend JAMAIS (rien qu'un `trySend` vers
+         * une voie non bornée et des écritures atomiques). Le pong est mis
+         * à jour ICI, AVANT tout traitement : la santé ne peut plus être
+         * retardée par une console ou un canal aval, quelle que soit la
+         * charge (c'était le mécanisme du « orchestrateur muet » v0.48 :
+         * une pompe unique suspendue sur un `send` plein).
          *
          * Exemption detekt ciblée (règle 16) : CyclomaticComplexMethod —
          * une branche par TYPE d'événement du protocole (le contrat complet
-         * de l'orchestrateur, v3 comprise : tâches au fil du build, étapes
-         * de sync), chacune déléguée d'une ligne : un aiguillage plat, pas
-         * de la logique imbriquée — l'éclater déplacerait le problème.
+         * de l'orchestrateur), chacune déléguée d'une ligne : un aiguillage
+         * plat, pas de la logique imbriquée — l'éclater déplacerait le
+         * problème.
          */
         @Suppress("CyclomaticComplexMethod")
-        private suspend fun pomper(evenement: ToolingEvent) {
+        private fun router(
+            evenement: ToolingEvent,
+            voieBuild: Channel<ToolingEvent>,
+            voieSync: Channel<ToolingEvent>,
+        ) {
             when (evenement) {
+                // Chemin rapide DU health check (§5.4) : la réponse de santé
+                // est la seule frame qui ne doit JAMAIS attendre.
+                is PongMessage -> {
+                    dernierPongMs.value = System.currentTimeMillis()
+                }
+
+                // v0.43.0 (mesure console lente) : la latence TRANSPORT se
+                // mesure à la RÉCEPTION (ici), hors de tout retard aval —
+                // l'écart restant se lit côté publication (GradleService).
                 is BuildOutput -> {
-                    pomperSortie(evenement)
+                    latencesTransport
+                        .computeIfAbsent(evenement.buildId) { AccumulateurLatence() }
+                        .enregistrer(System.currentTimeMillis() - evenement.timestampMs)
+                    deposer(voieBuild, profondeurBuild, "build", evenement)
                 }
 
-                is BuildStarted -> {
-                    pomperDemarrage(evenement)
+                is BuildStarted,
+                is BuildFinished,
+                is TaskStarted,
+                is TaskFinished,
+                is ProgressEvent,
+                -> {
+                    deposer(voieBuild, profondeurBuild, "build", evenement)
                 }
 
-                is BuildFinished -> {
-                    pomperFin(evenement)
+                // v4 (§3.1) : tout événement de sync est un signe de vie,
+                // mesuré à la RÉCEPTION — le délai d'inactivité ne peut
+                // plus mourir derrière une console sync lente.
+                is SyncStarted,
+                is SyncResult,
+                is PartialSyncResult,
+                is SyncProgress,
+                is SyncOutput,
+                -> {
+                    derniereActiviteSyncMs.set(System.currentTimeMillis())
+                    deposer(voieSync, profondeurSync, "sync", evenement)
+                }
+
+                // v0.48.0 (ADR 0079) : un échec répondant à une sync en vol
+                // CONCLUT le flux — il traverse la VOIE SYNC pour ne jamais
+                // précéder les lignes qu'il conclut (l'ordre du câble EST
+                // l'ordre de la console).
+                is ErrorResponse -> {
+                    deposer(voieSync, profondeurSync, "sync", evenement)
                 }
 
                 is HeapEvent -> {
@@ -522,30 +679,6 @@ class GradleApiImpl
 
                 is Diagnostic -> {
                     diagnosticsGlobal.value = listOf(evenement.versDiagnosticDomaine())
-                }
-
-                is SyncStarted, is SyncResult, is PartialSyncResult -> {
-                    pomperSync(evenement)
-                }
-
-                is SyncProgress -> {
-                    pomperEtapeSync(evenement)
-                }
-
-                // v0.48.0 (ADR 0079) : le VRAI flux de Gradle pendant la
-                // sync — stdout/stderr ligne à ligne, dans le flux ordonné.
-                is SyncOutput -> {
-                    pomperSortieSync(evenement)
-                }
-
-                // v4 (§6) — les téléchargements du build alimentent leur
-                // canal (arbre du build, « n / N ») ; les ProgressEvent
-                // textuels deviennent des LIGNES de console immédiates
-                // (v0.45.1 — cf. pomperStatutBuild : plus aucun statut du
-                // serveur n'est jeté à la réception).
-                is ProgressEvent -> {
-                    pomperTelechargement(evenement)
-                    pomperStatutBuild(evenement)
                 }
 
                 is TasksResult -> {
@@ -560,35 +693,110 @@ class GradleApiImpl
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 
-                is ErrorResponse -> {
-                    pomperErreur(evenement)
-                }
-
-                is PongMessage -> {
-                    // Repère du health check du daemon (§5.4) : la réponse
-                    // de santé rafraîchit l'horodatage observé.
-                    dernierPongMs.value = System.currentTimeMillis()
-                }
-
-                // santé pilotée par le daemon (G4)
-
+                // réponse de handshake déjà consommée
                 is HelloResponse -> {
                     Unit
                 }
+            }
+        }
 
-                // réponse de handshake déjà consommée
+        /**
+         * Dépose un événement dans sa voie ordonnée et surveille la
+         * profondeur : une voie qui croît signale un consommateur aval en
+         * retard (console lente) — le retard se NOMME en se formant, le
+         * signalement est borné en débit.
+         */
+        private fun deposer(
+            voie: Channel<ToolingEvent>,
+            profondeur: java.util.concurrent.atomic.AtomicLong,
+            nom: String,
+            evenement: ToolingEvent,
+        ) {
+            voie.trySend(evenement)
+            val valeur = profondeur.incrementAndGet()
+            if (valeur >= SEUIL_ALERTE_VOIE) {
+                val maintenant = System.currentTimeMillis()
+                val dernier = dernierAvertissementVoieMs.get()
+                if (maintenant - dernier >= INTERVALLE_ALERTE_VOIE_MS &&
+                    dernierAvertissementVoieMs.compareAndSet(dernier, maintenant)
+                ) {
+                    journal.w(TAG_POMPE) {
+                        "voie $nom à $valeur événement(s) en attente — la console aval est en retard"
+                    }
+                }
+            }
+        }
 
-                // v3 — le trou est réparé : les événements de granularité
-                // tâche alimentent [observeTachesBuild] (une ligne par tâche
-                // dans la console, mise à jour en place à sa fin — comme la
-                // vue Build d'Android Studio) ; l'état du BUILD reste celui
-                // de [observeBuildState], les deux ne se mélangent pas.
+        /**
+         * Consommateur de la voie BUILD (v0.49.0) : les envois suspendants
+         * de la famille build, DANS l'ordre d'arrivée — l'ordre relatif
+         * lignes/état/clôture de canal est celui du câble.
+         */
+        private suspend fun pomperBuild(evenement: ToolingEvent) {
+            when (evenement) {
+                is BuildOutput -> {
+                    pomperSortie(evenement)
+                }
+
+                is BuildStarted -> {
+                    pomperDemarrage(evenement)
+                }
+
+                is BuildFinished -> {
+                    pomperFin(evenement)
+                }
+
+                is ProgressEvent -> {
+                    pomperTelechargement(evenement)
+                    pomperStatutBuild(evenement)
+                }
+
                 is TaskStarted -> {
                     pomperTacheDemarree(evenement)
                 }
 
                 is TaskFinished -> {
                     pomperTacheTerminee(evenement)
+                }
+
+                else -> {
+                    // Inatteignable : le routeur a déjà filtré la famille.
+                    Unit
+                }
+            }
+        }
+
+        /**
+         * Consommateur de la voie SYNC (v0.49.0) : la famille sync ET les
+         * ErrorResponse qui la concluent, DANS l'ordre d'arrivée — le
+         * terminal ne peut pas précéder les lignes qu'il conclut (ADR
+         * 0079), la promesse se réveille APRÈS le terminal (même ordre que
+         * le câble).
+         */
+        private suspend fun pomperSyncFamille(evenement: ToolingEvent) {
+            when (evenement) {
+                is SyncStarted,
+                is SyncResult,
+                is PartialSyncResult,
+                -> {
+                    pomperSync(evenement)
+                }
+
+                is SyncProgress -> {
+                    pomperEtapeSync(evenement)
+                }
+
+                is SyncOutput -> {
+                    pomperSortieSync(evenement)
+                }
+
+                is ErrorResponse -> {
+                    pomperErreur(evenement)
+                }
+
+                else -> {
+                    // Inatteignable : le routeur a déjà filtré la famille.
+                    Unit
                 }
             }
         }
@@ -971,9 +1179,8 @@ class GradleApiImpl
 
         /** Une ligne de sortie arrive : elle part dans le canal du build. */
         private suspend fun pomperSortie(evenement: BuildOutput) {
-            latencesTransport
-                .computeIfAbsent(evenement.buildId) { AccumulateurLatence() }
-                .enregistrer(System.currentTimeMillis() - evenement.timestampMs)
+            // v0.49.0 : la latence TRANSPORT est enregistrée à la réception
+            // par le routeur — le retard restant se mesure côté publication.
             sorties[evenement.buildId]?.send(
                 LigneSortieBuild(
                     buildId = evenement.buildId,
@@ -1080,6 +1287,17 @@ class GradleApiImpl
 
         private companion object {
             /**
+             * Voie DÉDIÉE de la pompe (v0.49.0, ADR 0080) : trois fils au
+             * plus — lecteur + consommateur build + consommateur sync. Une
+             * voie DÉDIÉE de `Dispatchers.IO` (et non le dispatcheur par
+             * DÉFAUT partagé) : la saturation de celui-ci par le travail
+             * CPU (préparation du classpath LSP, surlignage) ne peut plus
+             * retarder la lecture du socket — les coroutines de la pompe
+             * ne partagent plus leur ordonnanceur avec ce travail-là.
+             */
+            private val DISPATCH_POMPE = Dispatchers.IO.limitedParallelism(3)
+
+            /**
              * Tampon de sortie par build (§5.2 : 4096, envoi suspendant —
              * jamais conflaté, jamais perdant).
              */
@@ -1108,5 +1326,14 @@ class GradleApiImpl
 
             /** Étiquette des résumés de latence (mesure console, v0.43.0). */
             const val TAG_LATENCE = "ConsoleLatence"
+
+            /** Étiquette de la pompe cliente (v0.49.0, ADR 0080). */
+            const val TAG_POMPE = "ToolingClient"
+
+            /** Profondeur d'une voie au-delà de laquelle elle est signalée. */
+            const val SEUIL_ALERTE_VOIE = 2_048L
+
+            /** Bornage du débit des avertissements de voie (5 s). */
+            const val INTERVALLE_ALERTE_VOIE_MS = 5_000L
         }
     }

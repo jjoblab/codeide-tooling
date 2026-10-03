@@ -387,7 +387,16 @@ class DaemonManager
             while (true) {
                 delay(intervalleSanteMs)
                 if (System.currentTimeMillis() - api.dernierPongMs.value > delaiSanteMs) {
-                    journal.w(TAG) { "orchestrateur muet (aucun pong en $delaiSanteMs ms) — arrêt forcé" }
+                    // v0.49.0 (ADR 0080) : les signes vitaux de la pompe
+                    // cliente accompagnent le verdict — une voie profonde
+                    // désigne une console lente CÔTÉ APP (tuer l'orchestrateur
+                    // ne réparait rien : c'était le réflexe qui tuait un
+                    // orchestrateur sain en v0.48), des voies vides et un pong
+                    // vieux désignent un orchestrateur réellement mort.
+                    journal.w(TAG) {
+                        "orchestrateur muet (aucun pong en $delaiSanteMs ms) — arrêt forcé ; " +
+                            "signes vitaux : ${api.signesVitaux()}"
+                    }
                     process.kill(force = true)
                     return
                 }
