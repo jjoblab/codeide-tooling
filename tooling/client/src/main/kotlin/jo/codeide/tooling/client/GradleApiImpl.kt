@@ -10,11 +10,13 @@ import jo.codeide.core.domain.EtatBuild
 import jo.codeide.core.domain.EtatConnexion
 import jo.codeide.core.domain.EtatSyncTooling
 import jo.codeide.core.domain.EtatTacheBuild
+import jo.codeide.core.domain.EvenementSyncFlux
 import jo.codeide.core.domain.FluxSortieBuild
 import jo.codeide.core.domain.GradleToolingRepository
 import jo.codeide.core.domain.InfoTache
 import jo.codeide.core.domain.InstantaneTas
 import jo.codeide.core.domain.LigneSortieBuild
+import jo.codeide.core.domain.LigneSortieSync
 import jo.codeide.core.domain.ResultatSynchronisation
 import jo.codeide.core.domain.StatutBuild
 import jo.codeide.core.domain.StatutTache
@@ -41,6 +43,7 @@ import jo.codeide.tooling.protocol.HelloResponse
 import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.PongMessage
 import jo.codeide.tooling.protocol.ProgressEvent
+import jo.codeide.tooling.protocol.SyncOutput
 import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
@@ -184,12 +187,27 @@ class GradleApiImpl
             ConcurrentHashMap<String, AccumulateurLatence>()
 
         /**
-         * Étapes de sync — canal borné, envoi suspendant (v3) : l'ordre
-         * départ/fin de chaque phase est l'information, la conflation
-         * mentirait. Unique pour le process : les syncs se succèdent, ne se
-         * chevauchent pas (une seule session orchestrateur).
+         * Flux de synchronisation COMPLET et ORDONNÉ — canal borné, envoi
+         * suspendant (v0.48.0, ADR 0079 ; il fut le canal des seules étapes
+         * en v3) : [EvenementSyncFlux.Debut], [EvenementSyncFlux.Ligne] au
+         * fil de l'eau, [EvenementSyncFlux.Etape] à chaque transition, puis
+         * [EvenementSyncFlux.Terminal] en DERNIER — la pompe y envoie DANS
+         * L'ORDRE D'ARRIVÉE des événements du serveur (un seul fil, des
+         * `send` séquentiels) : la conclusion du flux ne peut pas précéder
+         * les lignes et étapes qu'elle conclut. Unique pour le process : les
+         * syncs se succèdent, ne se chevauchent pas (une seule session
+         * orchestrateur).
          */
-        private val progressionSync = Channel<EtapeSyncTooling>(TAILLE_TAMPON_SYNC)
+        private val flusSync = Channel<EvenementSyncFlux>(TAILLE_TAMPON_SYNC)
+
+        /**
+         * Requêtes de sync EN VOL (v0.48.0) — identifiants des syncs
+         * envoyées au serveur : un [ErrorResponse] ou une rupture de session
+         * qui répond à l'une d'elles produit un TERMINAL (une UI « en
+         * cours » morte est le bug corrigé par ADR 0079 — plus aucun
+         * SyncResult n'arrivera, le flux doit conclure lui-même).
+         */
+        private val syncsEnVol = ConcurrentHashMap.newKeySet<String>()
 
         /** États par build — conflation légitime (état courant). */
         private val etats = ConcurrentHashMap<String, MutableStateFlow<EtatBuild>>()
@@ -287,37 +305,63 @@ class GradleApiImpl
         }
 
         /**
-         * Conclut une sync EN COURS à la perte de session (étape 32) :
-         * plus aucun résultat n'arrivera — l'état observé repasse au
-         * repos, l'UI ne reste pas suspendue sur un « en cours » mort.
+         * Conclut une sync EN COURS à la perte de session (étape 32 ;
+         * v0.48.0 : le TERMINAL traverse le flux ordonné) : plus aucun
+         * résultat n'arrivera — le flux se conclut lui-même (échec de
+         * connexion), l'état observable repasse au repos, l'UI ne reste pas
+         * suspendue sur un « en cours » mort. `trySend` : la rupture peut
+         * survenir hors d'un contexte suspendu — le canal borné (256)
+         * absorbe sans attendre.
          */
         private fun rompreSyncEnCours() {
             if (sync.value.enCours) {
                 sync.value = EtatSyncTooling(enCours = false)
             }
+            if (syncsEnVol.isEmpty()) return
+            val echec: AppResult<ResultatSynchronisation> =
+                AppResult.Failure(
+                    AppError.Tooling(ToolingReason.ConnectionLost, "connexion avec l'orchestrateur perdue"),
+                )
+            syncsEnVol.forEach { flusSync.trySend(EvenementSyncFlux.Terminal(echec)) }
+            syncsEnVol.clear()
         }
 
         /**
-         * Routage des événements de synchronisation (étape 32, ADR 0057) :
-         * le départ annoncé PAR le serveur alimente l'état observable — la
-         * promesse, elle, attend toujours le résultat.
+         * Routage des événements de synchronisation (étape 32, ADR 0057 ;
+         * v0.48.0, ADR 0079 : suspendu — chaque événement traverse le canal
+         * ORDONNÉ avant de toucher à la promesse) : le départ annoncé PAR le
+         * serveur alimente le flux ET l'état observable, le résultat termine
+         * le flux AVANT de réveiller l'attendeur — l'ordre du câble est
+         * l'ordre de la console.
          */
-        private fun pomperSync(evenement: ToolingEvent) {
+        private suspend fun pomperSync(evenement: ToolingEvent) {
             // v4 (§3.1) : tout événement de sync est un signe de vie — le
             // délai d'INACTIVITÉ de [synchroniser] se réarme ici.
             derniereActiviteSyncMs.set(System.currentTimeMillis())
             when (evenement) {
                 is SyncStarted -> {
+                    flusSync.send(EvenementSyncFlux.Debut(projectDir = evenement.projectDir))
                     sync.value = EtatSyncTooling(enCours = true, projectDir = evenement.projectDir)
                 }
 
                 is SyncResult -> {
+                    syncsEnVol.remove(evenement.id)
                     sync.value = EtatSyncTooling(enCours = false, projectDir = evenement.projectDir)
+                    // v0.48.0 (ADR 0079) : le TERMINAL précède le
+                    // réveil de l'attendeur — la vidange conclura l'UI
+                    // (console + en-tête) sur le FAIT du serveur, même si
+                    // la coroutine lancante est morte entre-temps. Un
+                    // SyncResult tardif (délai d'inactivité dépassé côté
+                    // client puis serveur conclut quand même) conclut
+                    // aussi : chronologie honnête, le dernier verdict gagne.
+                    flusSync.send(EvenementSyncFlux.Terminal(AppResult.Success(evenement.versResultatDomaine())))
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 
                 is PartialSyncResult -> {
+                    syncsEnVol.remove(evenement.id)
                     sync.value = EtatSyncTooling(enCours = false, projectDir = evenement.projectDir)
+                    flusSync.send(EvenementSyncFlux.Terminal(AppResult.Success(evenement.versResultatDomaine())))
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 
@@ -330,9 +374,10 @@ class GradleApiImpl
         }
 
         /**
-         * Une étape de sync traverse (v3) : elle part dans le canal des
-         * étapes — l'état `enCours` reste porté par [sync] (conflation
-         * légitime d'un ÉTAT), les ÉTAPES ne se mélangent jamais.
+         * Une étape de sync traverse (v3 ; v0.48.0 : dans le flux ORDONNÉ) :
+         * elle part dans le canal du flux — l'état `enCours` reste porté par
+         * [sync] (conflation légitime d'un ÉTAT), les ÉTAPES ne se mélangent
+         * jamais.
          */
         private suspend fun pomperEtapeSync(evenement: SyncProgress) {
             // v4 (§3.1) : une étape (même une progression d'octet) est un
@@ -340,17 +385,39 @@ class GradleApiImpl
             // v6 (prompt de suivi §2) : plus de champ `sautee` — une phase
             // qui n'a pas lieu n'est pas émise par le serveur.
             derniereActiviteSyncMs.set(System.currentTimeMillis())
-            progressionSync.send(
-                EtapeSyncTooling(
-                    projectDir = evenement.projectDir,
-                    etape = EtapeSync.valueOf(evenement.phase.name),
-                    terminee = evenement.terminee,
-                    dureeMs = evenement.dureeMs,
-                    octetsRecus = evenement.octetsRecus,
-                    octetsTotal = evenement.octetsTotal,
-                    element = evenement.element,
-                    compteur = evenement.compteur,
-                    total = evenement.total,
+            flusSync.send(
+                EvenementSyncFlux.Etape(
+                    EtapeSyncTooling(
+                        projectDir = evenement.projectDir,
+                        etape = EtapeSync.valueOf(evenement.phase.name),
+                        terminee = evenement.terminee,
+                        dureeMs = evenement.dureeMs,
+                        octetsRecus = evenement.octetsRecus,
+                        octetsTotal = evenement.octetsTotal,
+                        element = evenement.element,
+                        compteur = evenement.compteur,
+                        total = evenement.total,
+                    ),
+                ),
+            )
+        }
+
+        /**
+         * Une ligne de sortie de sync traverse (v0.48.0, ADR 0079) : elle
+         * rejoint le flux ORDONNÉ — le VRAI flux de Gradle s'affiche dans
+         * la console Sync, entre le départ et le terminal. Une ligne est un
+         * signe de vie (le délai d'inactivité se réarme).
+         */
+        private suspend fun pomperSortieSync(evenement: SyncOutput) {
+            derniereActiviteSyncMs.set(System.currentTimeMillis())
+            flusSync.send(
+                EvenementSyncFlux.Ligne(
+                    LigneSortieSync(
+                        projectDir = evenement.projectDir,
+                        flux = evenement.stream.versFluxDomaine(),
+                        ligne = evenement.line,
+                        horodatageMs = evenement.timestampMs,
+                    ),
                 ),
             )
         }
@@ -374,6 +441,23 @@ class GradleApiImpl
                     compteur = detail.compteur,
                 ),
             )
+        }
+
+        /**
+         * Une réponse d'ERREUR traverse (v0.48.0, ADR 0079) : un ErrorResponse
+         * qui répond à une SYNC en vol est un TERMINAL — aucun SyncResult
+         * n'arrivera derrière lui, le flux doit conclure pour que l'UI ne
+         * reste pas « en cours » à jamais. La promesse suit son cours.
+         */
+        private fun pomperErreur(evenement: ErrorResponse) {
+            if (syncsEnVol.remove(evenement.requestId)) {
+                flusSync.trySend(
+                    EvenementSyncFlux.Terminal(
+                        AppResult.Failure(evenement.versErreurDomaine()),
+                    ),
+                )
+            }
+            promesses.remove(evenement.requestId)?.complete(evenement)
         }
 
         /** Une tâche démarre (v3) : elle part dans le canal du build. */
@@ -448,6 +532,12 @@ class GradleApiImpl
                     pomperEtapeSync(evenement)
                 }
 
+                // v0.48.0 (ADR 0079) : le VRAI flux de Gradle pendant la
+                // sync — stdout/stderr ligne à ligne, dans le flux ordonné.
+                is SyncOutput -> {
+                    pomperSortieSync(evenement)
+                }
+
                 // v4 (§6) — les téléchargements du build alimentent leur
                 // canal (arbre du build, « n / N ») ; les ProgressEvent
                 // textuels deviennent des LIGNES de console immédiates
@@ -471,7 +561,7 @@ class GradleApiImpl
                 }
 
                 is ErrorResponse -> {
-                    promesses.remove(evenement.requestId)?.complete(evenement)
+                    pomperErreur(evenement)
                 }
 
                 is PongMessage -> {
@@ -522,7 +612,7 @@ class GradleApiImpl
 
         override fun observeSyncState(): Flow<EtatSyncTooling> = sync.asStateFlow()
 
-        override fun observeSyncProgress(): Flow<EtapeSyncTooling> = progressionSync.receiveAsFlow()
+        override fun observeFluxSync(): Flow<EvenementSyncFlux> = flusSync.receiveAsFlow()
 
         override fun observeDiagnostics(projectDir: File): Flow<List<DiagnosticBuild>> = diagnosticsGlobal.asStateFlow()
 
@@ -544,42 +634,16 @@ class GradleApiImpl
                     ),
                 ) ?: return echecConnexion()
             return when (reponse) {
+                // v0.48.0 (ADR 0079) : la MÊME traduction que le terminal du
+                // flux ordonné (versResultatDomaine) — le résultat attendu
+                // par l'appelant et celui publié à l'UI par la vidange ne
+                // peuvent pas diverger.
                 is SyncResult -> {
-                    AppResult.Success(
-                        ResultatSynchronisation(
-                            projectDir = reponse.projectDir,
-                            reussie = reponse.succeeded,
-                            dureeMs = reponse.durationMs,
-                            messageEchec = reponse.failureMessage,
-                            // v0.47.0 : les tâches résolues par l'action
-                            // TRAVERSENT avec le résultat — l'UI arme le
-                            // bouton Tâches SUR CE FAIT, sans second
-                            // aller-retour de listage (champ optionnel :
-                            // un serveur antérieur ne l'envoie pas, la
-                            // liste reste vide et l'appelant retombe sur
-                            // `taches()` — le cache vient d'être déposé).
-                            taches =
-                                reponse.taches.map { tache: TaskInfo ->
-                                    InfoTache(
-                                        chemin = tache.path,
-                                        groupe = tache.group,
-                                        nomAffiche = tache.displayName,
-                                    )
-                                },
-                        ),
-                    )
+                    AppResult.Success(reponse.versResultatDomaine())
                 }
 
                 is PartialSyncResult -> {
-                    AppResult.Success(
-                        ResultatSynchronisation(
-                            projectDir = reponse.projectDir,
-                            reussie = false,
-                            partielle = true,
-                            modelesResolus = reponse.resolvedModels,
-                            modelesEchoues = reponse.failedModels,
-                        ),
-                    )
+                    AppResult.Success(reponse.versResultatDomaine())
                 }
 
                 is ErrorResponse -> {
@@ -767,12 +831,17 @@ class GradleApiImpl
         @Suppress("ReturnCount", "SwallowedException")
         private suspend fun echangerAvecInactivite(requete: ToolingRequest): ToolingEvent? {
             val sessionCourante = session ?: return null
+            // v0.48.0 : la requête de sync est EN VOL — un ErrorResponse, un
+            // SyncResult tardif ou une rupture saura la conclure (terminal
+            // du flux ordonné, ADR 0079).
+            if (requete is SyncRequest) syncsEnVol.add(requete.id)
             val promesse = CompletableDeferred<ToolingEvent>()
             promesses[requete.id] = promesse
             try {
                 sessionCourante.envoyer(requete)
             } catch (perdue: java.io.IOException) {
                 promesses.remove(requete.id)
+                if (requete is SyncRequest) syncsEnVol.remove(requete.id)
                 return null
             }
             while (true) {

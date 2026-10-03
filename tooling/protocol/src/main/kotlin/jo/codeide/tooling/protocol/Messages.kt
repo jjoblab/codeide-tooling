@@ -420,6 +420,37 @@ public data class SyncProgress(
 ) : ToolingEvent
 
 /**
+ * Une ligne de sortie (stdout/stderr) de la SYNCHRONISATION — miroir de
+ * [BuildOutput] pour le canal Sync (v0.48.0, ADR 0079).
+ *
+ * La capture stdout/stderr de la sync avait été retirée en v0.45.1 : les
+ * lignes partaient avec l'identifiant de la REQUÊTE de sync comme
+ * `buildId`, or le client n'ouvrait un canal de sortie QUE pour les
+ * identifiants de BUILD — publication morte, jetée à la réception. Le
+ * bon correctif n'était pas de couper la capture mais de lui donner SON
+ * message : [SyncOutput] voyage sur le bus avec le dossier du projet, la
+ * console Sync affiche le VRAI flux de Gradle (avertissements de
+ * configuration, `println` de build script, diagnostics) comme la fenêtre
+ * Sync d'Android Studio — plus les statuts textuels de la fenêtre daemon
+ * (« Starting Gradle Daemon ») que le serveur y republie.
+ *
+ * @property projectDir dossier synchronisé (corrélation côté client).
+ * @property stream flux d'origine.
+ * @property line contenu de la ligne, sans terminaison.
+ * @property timestampMs horodatage d'émission (mesure de latence v0.43.0).
+ */
+@Serializable
+@SerialName("sync_output")
+public data class SyncOutput(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val stream: StreamKind,
+    public val line: String,
+    public val timestampMs: Long,
+) : ToolingEvent
+
+/**
  * Phase énumérée d'une synchronisation (v4 — RÉELLES, dans l'ordre du
  * déroulé) — miroir câble de l'étape domaine, l'UI choisit ses libellés.
  * L'ancienne v3 mentait : `CONNEXION` (le `connect()` ne télécharge rien,

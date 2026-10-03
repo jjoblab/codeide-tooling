@@ -1,1 +1,1 @@
-{"type":"sync_result","id":"evt-43","protocolVersion":5,"projectDir":"/projets/demo","succeeded":true,"durationMs":4200,"failureMessage":null,"taches":[{"path":":app:assembleDebug","group":"build","displayName":"assembleDebug"},{"path":":app:clean","group":"build","displayName":"clean"}]}
+{"type":"sync_result","id":"evt-43","protocolVersion":6,"projectDir":"/projets/demo","succeeded":true,"durationMs":4200,"failureMessage":null,"taches":[{"path":":app:assembleDebug","group":"build","displayName":"assembleDebug"},{"path":":app:clean","group":"build","displayName":"clean"}]}

@@ -131,6 +131,17 @@ internal object EchantillonsMessages {
                 element = "kotlin-stdlib-2.2.10.jar",
                 compteur = 3,
             ),
+            // v0.48.0 (ADR 0079) : le stdout/stderr de la sync a SON message —
+            // la console Sync affiche le vrai flux de Gradle, comme la
+            // fenêtre Sync d'Android Studio.
+            SyncOutput(
+                ID_EVENEMENT,
+                VERSION,
+                projectDir = "/projets/demo",
+                stream = StreamKind.STDOUT,
+                line = "Starting Gradle Daemon",
+                timestampMs = 1_727_100_000_000,
+            ),
             TasksResult(
                 ID_EVENEMENT,
                 VERSION,

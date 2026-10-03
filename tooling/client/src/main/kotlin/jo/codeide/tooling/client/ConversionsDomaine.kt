@@ -4,18 +4,24 @@ import jo.codeide.core.domain.ClasspathProjet
 import jo.codeide.core.domain.DiagnosticBuild
 import jo.codeide.core.domain.EntreeClasspath
 import jo.codeide.core.domain.FluxSortieBuild
+import jo.codeide.core.domain.InfoTache
 import jo.codeide.core.domain.ModuleClasspath
+import jo.codeide.core.domain.ResultatSynchronisation
 import jo.codeide.core.domain.SeveriteDiagnostic
 import jo.codeide.core.domain.TypeEntreeClasspath
 import jo.codeide.core.model.AppError
 import jo.codeide.core.model.AppError.ToolingReason
+import jo.codeide.core.model.AppResult
 import jo.codeide.tooling.protocol.ClasspathKind
 import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.Diagnostic
 import jo.codeide.tooling.protocol.DiagnosticSeverity
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
+import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.StreamKind
+import jo.codeide.tooling.protocol.SyncResult
+import jo.codeide.tooling.protocol.TaskInfo
 
 /**
  * Traductions protocole → domaine du client tooling (extraites de
@@ -100,4 +106,39 @@ internal fun ErrorResponse.versErreurDomaine(): AppError.Tooling =
                 ErrorCode.INTERNAL_ERROR -> ToolingReason.Internal
             },
         message = message,
+    )
+
+/**
+ * Traduit un [SyncResult] du protocole vers le domaine (v0.48.0, ADR 0079) :
+ * la MÊME traduction sert la valeur de retour de `synchroniser()` ET le
+ * terminal du flux ordonné `observeFluxSync` — le résultat publié à l'état
+ * et celui attendu par l'appelant ne peuvent pas diverger.
+ *
+ * v0.47.0 : les tâches résolues par l'action TRAVERSENT avec le résultat —
+ * l'UI arme le bouton Tâches sur le fait, sans second aller-retour.
+ */
+internal fun SyncResult.versResultatDomaine(): ResultatSynchronisation =
+    ResultatSynchronisation(
+        projectDir = projectDir,
+        reussie = succeeded,
+        dureeMs = durationMs,
+        messageEchec = failureMessage,
+        taches =
+            taches.map { tache: TaskInfo ->
+                InfoTache(
+                    chemin = tache.path,
+                    groupe = tache.group,
+                    nomAffiche = tache.displayName,
+                )
+            },
+    )
+
+/** Traduit un [PartialSyncResult] (Resilient Sync, §5.3) vers le domaine. */
+internal fun PartialSyncResult.versResultatDomaine(): ResultatSynchronisation =
+    ResultatSynchronisation(
+        projectDir = projectDir,
+        reussie = false,
+        partielle = true,
+        modelesResolus = resolvedModels,
+        modelesEchoues = failedModels,
     )

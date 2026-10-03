@@ -1,6 +1,8 @@
 package jo.codeide.tooling.server
 
 import jo.codeide.tooling.protocol.GradleProtocol
+import jo.codeide.tooling.protocol.StreamKind
+import jo.codeide.tooling.protocol.SyncOutput
 import jo.codeide.tooling.protocol.SyncPhase
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
@@ -41,6 +43,13 @@ import java.io.File
  *   cumulés, compteur n) — n'arrive que si des téléchargements ont LIEU ;
  * - **CLASSPATHS** : les classpaths LSP extraits de `IdeaProject`, publiés
  *   AVANT [SyncResult] — « Synchronisé » ne s'affiche qu'après.
+ *
+ * v0.48.0 (ADR 0079) : la stdout/stderr de l'action est CAPTURÉE ligne à
+ * ligne ([StreamingFluxSync] → [SyncOutput]) — la console Sync montre le
+ * VRAI flux de Gradle (avertissements de configuration, `println` de
+ * build script) comme la fenêtre Sync d'Android Studio, et les statuts
+ * textuels de la fenêtre daemon (« Starting Gradle Daemon ») y sont
+ * republiés par [EcouteurStatutLegacy].
  *
  * Les arguments réglés (`--offline`, arguments libres) s'appliquent à la
  * requête (v4) : la sync cesse de les ignorer. Le résultat de l'action
@@ -216,30 +225,33 @@ internal class SyncHandler(
                     phases.surConfiguration(element, terminee, compteur)
                 },
             )
-        val ecouteurStatut = EcouteurStatutLegacy(phases)
+        val ecouteurStatut = EcouteurStatutLegacy(requete.projectDir, phases, bus)
 
         return withContext(Dispatchers.IO) {
             val executer =
                 connexion
                     .action(ActionSyncModeles())
-                    .withArguments(requete.arguments)
+                    .withArguments(requete.arguments + CONSOLE_TEXTE)
                     .addProgressListener(
                         ecouteur,
                         OperationType.FILE_DOWNLOAD,
                         OperationType.PROJECT_CONFIGURATION,
                     ).addProgressListener(ecouteurStatut)
-            // v0.45.1 : PLUS de capture stdout/stderr pendant la sync. La
-            // capture v0.41.1 publiait des BuildOutput avec l'identifiant de
-            // REQUÊTE SYNC comme buildId — or le client n'ouvre un canal de
-            // sortie QUE pour les identifiants de BUILD (GradleApiImpl.sorties)
-            // : chaque ligne était publiée sur le bus puis JETÉE à la
-            // réception (publication morte, jamais affichée depuis la
-            // refonte console v0.42.0). Retirer la capture supprime ce trafic
-            // mort — et le risque de contre-pression inutile sur le fil de
-            // sortie de Gradle pendant la sync. La vue Sync garde l'arbre des
-            // phases RÉELLES (ConteurPhasesSync) : c'est l'état affichable de
-            // la sync, comme la barre de progression d'Android Studio — qui,
-            // lui non plus, ne déverse PAS le stdout de sync.
+            // v0.48.0 (ADR 0079) : la capture stdout/stderr de la sync
+            // REVIENT — mais sur SON message. La capture v0.41.1 publiait
+            // des BuildOutput avec l'identifiant de REQUÊTE SYNC comme
+            // buildId — or le client n'ouvrait un canal de sortie QUE pour
+            // les identifiants de BUILD (GradleApiImpl.sorties) : chaque
+            // ligne était publiée sur le bus puis JETÉE à la réception
+            // (publication morte — c'est CE constat qui avait motivé la
+            // suppression v0.45.1). Le bon correctif n'était pas de couper
+            // la capture mais de lui donner son canal : [StreamingFluxSync]
+            // publie des [SyncOutput] (dossier du projet, pas de buildId)
+            // que le client route vers la console Sync. La console de sync
+            // cesse d'être muette : le flux de Gradle s'y lit, comme la
+            // fenêtre Sync d'Android Studio — retour terrain v0.47.0 :
+            // « lors d'un Sync la console manque les outputs nécessaires,
+            // la plupart est affiché dans le header du bottomsheet ».
             // Les marqueurs de phases streamés (vérifié sur le JAR 9.7.1 :
             // `setStreamedValueListener` retourne void, il ne s'enchaîne
             // PAS — posé avant `run`, les valeurs arrivent pendant).
@@ -259,6 +271,12 @@ internal class SyncHandler(
                     }
                 }
             }
+            // v0.48.0 : le VRAI flux de Gradle, stdout ET stderr — les
+            // avertissements de configuration et les `println` de build
+            // script s'affichent dans la console Sync (stderr en rouge au
+            // rendu, même discipline que le canal Build).
+            executer.setStandardOutput(StreamingFluxSync(requete.projectDir, StreamKind.STDOUT, bus))
+            executer.setStandardError(StreamingFluxSync(requete.projectDir, StreamKind.STDERR, bus))
             executer.run()
         }
     }
@@ -310,6 +328,9 @@ internal class SyncHandler(
     private companion object {
         /** Période du sondeur de distribution (ms). */
         const val PERIODE_SONDAGE_DISTRIBUTION_MS = 500L
+
+        /** Sortie Gradle en texte brut — même discipline que le build (v3). */
+        const val CONSOLE_TEXTE = "--console=plain"
     }
 }
 
@@ -327,11 +348,27 @@ internal class SyncHandler(
  * DAEMON de la vue Sync plutôt que la phase DISTRIBUTION : l'étape
  * « Daemon » montre CE qu'elle attend, la distribution reste ce
  * qu'elle était.
+ *
+ * v0.48.0 (ADR 0079) : chaque statut dont le TEXTE CHANGE est aussi
+ * republié comme ligne de la console Sync ([SyncOutput]) — retour
+ * terrain v0.47.0 : « la plupart est affiché dans le header du
+ * bottomsheet ». Ces descriptions sont le seul signal vivant pendant
+ * la fenêtre daemon (des minutes sur un téléphone froid) : elles
+ * appartiennent à la console, comme « Starting Gradle Daemon » dans la
+ * fenêtre Build d'Android Studio. La déduplication par changement de
+ * texte (plus le rabotage 5/s) borne le débit : un statut RÉPÉTÉ
+ * n'écrit rien.
  */
 internal class EcouteurStatutLegacy(
+    private val projectDir: String,
     private val phases: ConteurPhasesSync,
+    private val bus: EventBus,
 ) : org.gradle.tooling.ProgressListener {
     private var dernierStatutMs = 0L
+
+    /** Dernier texte publié en console (déduplication par changement). */
+    @Volatile
+    private var dernierTexteConsole: String? = null
 
     override fun statusChanged(evenement: org.gradle.tooling.ProgressEvent) {
         val maintenant = System.currentTimeMillis()
@@ -346,6 +383,24 @@ internal class EcouteurStatutLegacy(
                 SyncPhase.DISTRIBUTION
             }
         phases.progression(phase, element = description)
+        publierEnConsoleSiNouveau(description)
+    }
+
+    /** Republie le statut en console Sync quand son texte CHANGE — la
+     *  console est l'historique, l'en-tête du panneau le présent. */
+    private fun publierEnConsoleSiNouveau(description: String) {
+        if (dernierTexteConsole == description) return
+        dernierTexteConsole = description
+        bus.publier(
+            SyncOutput(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projectDir,
+                stream = StreamKind.STDOUT,
+                line = description,
+                timestampMs = System.currentTimeMillis(),
+            ),
+        )
     }
 
     private companion object {

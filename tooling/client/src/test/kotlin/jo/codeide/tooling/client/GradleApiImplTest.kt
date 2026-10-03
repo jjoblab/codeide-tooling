@@ -31,6 +31,7 @@ import jo.codeide.tooling.protocol.HeapEvent
 import jo.codeide.tooling.protocol.PartialSyncResult
 import jo.codeide.tooling.protocol.ProgressEvent
 import jo.codeide.tooling.protocol.StreamKind
+import jo.codeide.tooling.protocol.SyncOutput
 import jo.codeide.tooling.protocol.SyncPhase
 import jo.codeide.tooling.protocol.SyncProgress
 import jo.codeide.tooling.protocol.SyncRequest
@@ -505,21 +506,75 @@ class GradleApiImplTest {
             )
             session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.MODELE_TACHES))
 
-            val etapes = mutableListOf<EtapeSyncTooling>()
+            val evenements = mutableListOf<jo.codeide.core.domain.EvenementSyncFlux>()
             withTimeout(5_000) {
-                api.observeSyncProgress().take(3).toList(etapes)
+                api.observeFluxSync().take(3).toList(evenements)
             }
+            val etapesSync =
+                evenements.filterIsInstance<jo.codeide.core.domain.EvenementSyncFlux.Etape>().map {
+                    it.etape
+                }
             assertEquals(
                 listOf(EtapeSync.DAEMON, EtapeSync.DAEMON, EtapeSync.MODELE_TACHES),
-                etapes.map { it.etape },
+                etapesSync.map { it.etape },
             )
             assertEquals(
                 "départ puis fin : les deux annonces traversent",
                 listOf(false, true, false),
-                etapes.map { it.terminee },
+                etapesSync.map { it.terminee },
             )
-            assertEquals(1_500L, etapes[1].dureeMs)
-            assertEquals("le dossier annoncé voyage", "/p", etapes[0].projectDir)
+            assertEquals(1_500L, etapesSync[1].dureeMs)
+            assertEquals("le dossier annoncé voyage", "/p", etapesSync[0].projectDir)
+        }
+
+    @Test
+    fun `le flux de sync est ORDONNE - debut, lignes, etapes, terminal en dernier - v0_48_0`() =
+        runBlocking {
+            val session = SessionFactice()
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+
+            // L'ordre du câble : départ annoncé, ligne de flux réel, étape,
+            // puis le RÉSULTAT — le terminal doit rester LE DERNIER (la
+            // conclusion de la console n'arrive jamais au milieu du déroulé).
+            session.emettre(SyncStarted(nouvelId(), protocole, "/p"))
+            session.emettre(SyncOutput(nouvelId(), protocole, "/p", StreamKind.STDOUT, "Starting Gradle Daemon", 42L))
+            session.emettre(SyncOutput(nouvelId(), protocole, "/p", StreamKind.STDERR, "warning: config", 43L))
+            session.emettre(SyncProgress(nouvelId(), protocole, "/p", SyncPhase.DAEMON))
+            session.emettre(
+                SyncResult(
+                    nouvelId(),
+                    protocole,
+                    "/p",
+                    succeeded = true,
+                    durationMs = 8_400,
+                    taches = listOf(TaskInfo(path = ":app:build", group = "build", displayName = "build")),
+                ),
+            )
+
+            val evenements = mutableListOf<jo.codeide.core.domain.EvenementSyncFlux>()
+            withTimeout(5_000) {
+                api.observeFluxSync().take(5).toList(evenements)
+            }
+            assertEquals(
+                "l'ordre du câble est l'ordre du flux (terminal EN DERNIER)",
+                listOf("Debut", "Ligne", "Ligne", "Etape", "Terminal"),
+                evenements.map { it::class.simpleName },
+            )
+            val ligne = evenements[1] as jo.codeide.core.domain.EvenementSyncFlux.Ligne
+            assertEquals("Starting Gradle Daemon", ligne.sortie.ligne)
+            assertEquals(jo.codeide.core.domain.FluxSortieBuild.STDOUT, ligne.sortie.flux)
+            val ligneErreur = evenements[2] as jo.codeide.core.domain.EvenementSyncFlux.Ligne
+            assertEquals(jo.codeide.core.domain.FluxSortieBuild.STDERR, ligneErreur.sortie.flux)
+            val terminal = evenements[4] as jo.codeide.core.domain.EvenementSyncFlux.Terminal
+            val resultat = (terminal.resultat as AppResult.Success).value
+            assertTrue(resultat.reussie)
+            assertEquals(8_400L, resultat.dureeMs)
+            assertEquals(
+                "les tâches voyagent avec le terminal (v0.47.0)",
+                listOf(":app:build"),
+                resultat.taches.map { it.chemin },
+            )
         }
 
     // v6 (prompt de suivi §2) : le test `une phase SAUTEE en cache traverse

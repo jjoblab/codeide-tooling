@@ -1,1 +1,1 @@
-{"type":"dependencies_result","id":"evt-43","protocolVersion":5,"projectDir":"/projets/demo","dependencies":[{"module":"org.jetbrains.kotlin:kotlin-stdlib","configuration":"implementation"}]}
+{"type":"dependencies_result","id":"evt-43","protocolVersion":6,"projectDir":"/projets/demo","dependencies":[{"module":"org.jetbrains.kotlin:kotlin-stdlib","configuration":"implementation"}]}
