@@ -5,6 +5,7 @@ import jo.codeide.tooling.protocol.SyncPhase
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.SyncResult
 import jo.codeide.tooling.protocol.SyncStarted
+import jo.codeide.tooling.protocol.TaskInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -153,7 +154,14 @@ internal class SyncHandler(
 
     /** Conclusion : CLASSPATHS avant le résultat, cache déposé, phases
      *  pendantes closes — « Synchronisé » n'apparaît qu'après la dernière
-     *  phase (§3.2). */
+     *  phase (§3.2).
+     *
+     *  v0.47.0 : le [SyncResult] porte les tâches résolues PAR l'action
+     *  (`taches`) — le client arme le bouton Tâches SUR LE RÉSULTAT,
+     *  sans second aller-retour de listage (retour utilisateur : « une
+     *  fois la sync terminée, le bouton devrait être immédiatement
+     *  activé » — l'aller-retour `TasksRequest` qui suivait laissait le
+     *  bouton inerte le temps d'un IPC même servi par le cache). */
     private fun conclureAvecSucces(
         requete: SyncRequest,
         phases: ConteurPhasesSync,
@@ -175,6 +183,10 @@ internal class SyncHandler(
                 projectDir = requete.projectDir,
                 succeeded = true,
                 durationMs = System.currentTimeMillis() - debut,
+                taches =
+                    resultat.taches.map { dto ->
+                        TaskInfo(path = dto.path, group = dto.group, displayName = dto.displayName)
+                    },
             ),
         )
     }

@@ -336,7 +336,17 @@ public data class SyncStarted(
     public val projectDir: String,
 ) : ToolingEvent
 
-/** Synchronisation terminée (réussie ou échec sec). */
+/**
+ * Synchronisation terminée (réussie ou échec sec).
+ *
+ * v0.47.0 : `taches` porte les tâches résolues PAR L'ACTION de sync (le
+ * modèle `GradleProject` est déjà résolu au moment du résultat) — le
+ * client arme le bouton Tâches SUR LE RÉSULTAT, sans second aller-retour
+ * de listage. Champ optionnel : un serveur antérieur ne l'envoie pas, le
+ * client retombe alors sur `TasksRequest` (le cache serveur vient d'être
+ * déposé par la même sync — l'aller-retour reste rapide, il n'est juste
+ * plus obligatoire).
+ */
 @Serializable
 @SerialName("sync_result")
 public data class SyncResult(
@@ -346,6 +356,8 @@ public data class SyncResult(
     public val succeeded: Boolean,
     public val durationMs: Long,
     public val failureMessage: String? = null,
+    /** Tâches du projet résolues par la sync (v0.47.0 — vide si absentes). */
+    public val taches: List<TaskInfo> = emptyList(),
 ) : ToolingEvent
 
 /**

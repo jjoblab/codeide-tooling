@@ -97,7 +97,22 @@ internal object EchantillonsMessages {
                     ),
             ),
             SyncStarted(ID_EVENEMENT, VERSION, projectDir = "/projets/demo"),
-            SyncResult(ID_EVENEMENT, VERSION, projectDir = "/projets/demo", succeeded = true, durationMs = 4_200),
+            // v0.47.0 : le résultat PORTE les tâches résolues par l'action
+            // — le client arme le bouton Tâches sur CE fait, sans second
+            // aller-retour de listage (champ optionnel : absent du câble
+            // pour un serveur antérieur, la liste retombe à vide).
+            SyncResult(
+                ID_EVENEMENT,
+                VERSION,
+                projectDir = "/projets/demo",
+                succeeded = true,
+                durationMs = 4_200,
+                taches =
+                    listOf(
+                        TaskInfo(path = ":app:assembleDebug", group = "build", displayName = "assembleDebug"),
+                        TaskInfo(path = ":app:clean", group = "build", displayName = "clean"),
+                    ),
+            ),
             PartialSyncResult(
                 ID_EVENEMENT,
                 VERSION,
