@@ -217,16 +217,18 @@ internal class MessageDispatcher(
      * `BuildOutput` et le pong s'y ensevelissait — le daemon ne voyait plus
      * arriver de pong, déclarait l'orchestrateur muet (délai de santé) et le
      * TUAIT au milieu du build. Le pong est la seule frame qui ne doit
-     * JAMAIS attendre : il est écrit DIRECTEMENT sur le socket.
+     * JAMAIS attendre.
      *
-     * Sécurité de l'écriture croisée : [SocketClient.envoyer] est
-     * `@Synchronized` — chaque frame reste atomique, aucun entrelacement
-     * possible avec le consommateur du bus ; seul l'ordre RELATIF
-     * pong/événements peut s'inverser, sans conséquence (le pong ne porte
-     * aucune relation d'ordre avec les autres frames).
+     * v0.49.0 (ADR 0080) : la réponse passe en outre par la file PRIORITAIRE
+     * du fil écrivain du [SocketClient] — même une rafale d'événements en
+     * file d'écriture, ou une écriture bloquée sur le tampon de réception
+     * de l'app, ne peut plus l'ensevelir (l'ancien `@Synchronized` partagé
+     * la retenait derrière un consommateur bloqué — retour terrain v0.48 :
+     * « orchestrateur muet (aucun pong en 15000 ms) » en pleine sync).
+     * L'ordre relatif pong/événements peut s'inverser, sans conséquence.
      */
     private fun repondrePong(requete: PingMessage) {
-        socket.envoyer(
+        socket.envoyerPrioritaire(
             ProtocolJson
                 .encoder(
                     PongMessage(

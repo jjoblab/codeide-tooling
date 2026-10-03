@@ -64,6 +64,10 @@ public object ServerMain {
 
         try {
             Handshake.negocier(socket, config.secret)
+            // v0.49.0 (ADR 0080) : à partir d'ici, TOUTE frame passe par le
+            // fil écrivain unique (file FIFO + priorité pong) — le handshake
+            // seul écrit en direct, avant ce démarrage.
+            socket.demarrerEcrivain()
             bus.demarrer()
             dispatcher.demarrerSurveillance()
             dispatcher.boucle()

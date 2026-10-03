@@ -18,8 +18,10 @@ import kotlin.concurrent.thread
  * ([StreamingOutputStream], [ProgressBridge]) : bloquer un fil de pompage
  * de sortie Gradle est du contrôle de flux légitime, pas une fuite.
  *
- * Un unique fil consommateur écrit sur le socket : aucune frame ne peut
- * s'entrelacer (§4.5).
+ * Un unique fil consommateur alimente le fil écrivain du [SocketClient]
+ * (v0.49.0, ADR 0080 : aucune frame ne peut s'entrelacer, §4.5) ; la
+ * contre-pression de la file d'écriture remonte ici — la profondeur
+ * croissante est SIGNALÉE dans le [Journal], le retard se voit se former.
  */
 internal interface EventBus {
     /** Publie un événement — bloquant sous contre-pression, jamais perdant. */
@@ -70,6 +72,10 @@ internal class EventBusSocket(
                     while (actif || file.isNotEmpty()) {
                         val evenement = file.poll(POLL_VIDE_MS, TimeUnit.MILLISECONDS) ?: continue
                         socket.envoyer(ProtocolJson.encoder(evenement).encodeToByteArray())
+                        // v0.49.0 (ADR 0080) : profondeur anormale = l'écriture
+                        // vers l'app ne suit pas — le retard se NOMME en se
+                        // formant, pas à la fin du build.
+                        avertirSiRetard()
                     }
                 } catch (interruption: InterruptedException) {
                     // arrêt demandé : vider ce qui reste puis sortir
@@ -83,6 +89,25 @@ internal class EventBusSocket(
             }
     }
 
+    /**
+     * Signale une file d'événements qui s'accumule (borné en débit) : la
+     * contre-pression de l'écriture socket remonte jusqu'ici — un rapport
+     * de terrain qui contient cette ligne désigne le MAUVAIS CÔTÉ du tuyau
+     * sans instrumenter quoi que ce soit.
+     */
+    private fun avertirSiRetard() {
+        val profondeur = file.size
+        if (profondeur >= SEUIL_ALERTE) {
+            val maintenant = System.currentTimeMillis()
+            val dernier = dernierAvertissementMs.get()
+            if (maintenant - dernier >= INTERVALLE_ALERTE_MS &&
+                dernierAvertissementMs.compareAndSet(dernier, maintenant)
+            ) {
+                Journal.warn("file d'événements à $profondeur — écriture vers l'app en retard")
+            }
+        }
+    }
+
     private fun envoyerMalgreTout(evenement: ToolingEvent) {
         runCatching { socket.envoyer(ProtocolJson.encoder(evenement).encodeToByteArray()) }
     }
@@ -93,6 +118,11 @@ internal class EventBusSocket(
         consommateur?.join(ATTENTE_JOINTURE_MS)
     }
 
+    /** Datation du dernier avertissement de retard (bornage du débit). */
+    private val dernierAvertissementMs =
+        java.util.concurrent.atomic
+            .AtomicLong(0L)
+
     private companion object {
         /** Capacité de la file (rafales de sortie de build, §5.2 : large). */
         const val CAPACITE = 8192
@@ -102,5 +132,11 @@ internal class EventBusSocket(
 
         /** Attente max de fin du consommateur à l'arrêt. */
         const val ATTENTE_JOINTURE_MS = 2_000L
+
+        /** Profondeur au-delà de laquelle la file est signalée (v0.49.0). */
+        const val SEUIL_ALERTE = 512
+
+        /** Bornage du débit des avertissements de profondeur (5 s). */
+        const val INTERVALLE_ALERTE_MS = 5_000L
     }
 }
