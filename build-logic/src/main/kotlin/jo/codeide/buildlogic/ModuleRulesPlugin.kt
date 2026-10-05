@@ -98,9 +98,17 @@ class ModuleRulesPlugin : Plugin<Project> {
         chemin == ":core:bootstrap" -> setOf(":core:model", ":core:domain")
         // Terminal-1, section 2.3 : sessions shell réelles (Termux).
         chemin == ":core:terminal-runtime" -> setOf(":core:model", ":core:domain", ":core:bootstrap")
-        // Terminal-1, section 2.3 : seul feature autorisé à dépendre du
-        // runtime des sessions (rendu) — les autres features n'en dépendent pas.
-        chemin == ":feature:terminal" ->
+        // Terminal-1, section 2.3 : features autorisées à dépendre du
+        // runtime des sessions (rendu TerminalView).
+        //  - :feature:terminal : le plein écran (référence).
+        //  - :feature:install : v0.54.0 (ADR 0083) — le journal live de la
+        //    configuration est un MINI TerminalView INTÉGRÉ à l'écran
+        //    d'installation (même TerminalRuntime observeSorties, même
+        //    client TerminalViewClient ; artefacts terminal-view +
+        //    terminal-emulator identiques à feature:terminal).
+        //    Les autres features n'ont pas ce besoin (un TerminalView ne
+        //    rend qu'une session de pty vivante).
+        chemin == ":feature:terminal" || chemin == ":feature:install" ->
             setOf(":core:ui", ":core:domain", ":core:model", ":core:terminal-runtime")
         // Tooling (prompt compagnon Tooling, section 2.2) : aucun doublon
         // des interfaces du prompt Terminal — protocol ne dépend de rien
