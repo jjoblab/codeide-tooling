@@ -1,0 +1,1 @@
+{"type":"build_scripts_result","id":"evt-43","protocolVersion":7,"projectDir":"/projets/demo","scripts":[{"cheminRelatif":"build.gradle.kts","contenu":"plugins { id(\"com.android.application\") }","tailleOctets":48},{"cheminRelatif":"gradle/libs.versions.toml","contenu":"[versions]\nkotlin = \"2.2.10\"","tailleOctets":36}]}

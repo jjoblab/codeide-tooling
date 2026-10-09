@@ -2,6 +2,7 @@ package jo.codeide.tooling.server
 
 import jo.codeide.tooling.protocol.BuildInput
 import jo.codeide.tooling.protocol.BuildRequest
+import jo.codeide.tooling.protocol.BuildScriptsRequest
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.ClasspathRequest
 import jo.codeide.tooling.protocol.DependenciesRequest
@@ -57,6 +58,7 @@ internal class MessageDispatcher(
     private val dependances = DependenciesHandler(pool, bus)
     private val classpaths = ClasspathHandler(pool, bus, cacheSync)
     private val tas = HeapMonitor(bus)
+    private val scriptsBuild = BuildScriptsHandler(bus)
 
     /** Boucle de réception — retourne à la fin de connexion. */
     fun boucle() {
@@ -100,6 +102,10 @@ internal class MessageDispatcher(
 
                 is BuildInput -> {
                     traiterEntree(requete)
+                }
+
+                is BuildScriptsRequest -> {
+                    scriptsBuild.scripts(requete)
                 }
 
                 is SyncRequest,
