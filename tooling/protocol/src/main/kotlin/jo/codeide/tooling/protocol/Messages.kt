@@ -546,6 +546,34 @@ public data class DependenciesResult(
     public val dependencies: List<DependencyInfo>,
 ) : ToolingEvent
 
+/** Demande les scripts de build du projet (P1, ADR 0095). */
+@Serializable
+@SerialName("build_scripts_request")
+public data class BuildScriptsRequest(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+) : ToolingRequest
+
+/** Un script de build lu par le serveur (P1). */
+@Serializable
+@SerialName("build_script_info")
+public data class BuildScriptInfo(
+    public val cheminRelatif: String,
+    public val contenu: String,
+    public val tailleOctets: Long,
+)
+
+/** Réponse de [BuildScriptsRequest] (P1). */
+@Serializable
+@SerialName("build_scripts_result")
+public data class BuildScriptsResult(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val scripts: List<BuildScriptInfo>,
+) : ToolingEvent
+
 /** Demande un modèle de la Tooling API (projet, IDE générique…). */
 @Serializable
 @SerialName("model_request")
