@@ -1,1 +1,1 @@
-{"type":"sync_output","id":"evt-43","protocolVersion":6,"projectDir":"/projets/demo","stream":"stdout","line":"Starting Gradle Daemon","timestampMs":1727100000000}
+{"type":"sync_output","id":"evt-43","protocolVersion":7,"projectDir":"/projets/demo","stream":"stdout","line":"Starting Gradle Daemon","timestampMs":1727100000000}

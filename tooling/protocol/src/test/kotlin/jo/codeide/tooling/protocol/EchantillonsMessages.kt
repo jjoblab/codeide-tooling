@@ -162,6 +162,27 @@ internal object EchantillonsMessages {
                         ),
                     ),
             ),
+            // P1 (ADR 0095) : scripts de build lus par le serveur depuis le
+            // chemin FUSE réel du projet (build.gradle.kts, settings.gradle,
+            // gradle.properties, libs.versions.toml…).
+            BuildScriptsResult(
+                ID_EVENEMENT,
+                VERSION,
+                projectDir = "/projets/demo",
+                scripts =
+                    listOf(
+                        BuildScriptInfo(
+                            cheminRelatif = "build.gradle.kts",
+                            contenu = "plugins { id(\"com.android.application\") }",
+                            tailleOctets = 48,
+                        ),
+                        BuildScriptInfo(
+                            cheminRelatif = "gradle/libs.versions.toml",
+                            contenu = "[versions]\nkotlin = \"2.2.10\"",
+                            tailleOctets = 36,
+                        ),
+                    ),
+            ),
             ClasspathResult(
                 ID_EVENEMENT,
                 VERSION,

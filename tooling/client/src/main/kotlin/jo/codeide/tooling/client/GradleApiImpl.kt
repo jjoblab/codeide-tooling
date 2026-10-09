@@ -28,6 +28,7 @@ import jo.codeide.tooling.protocol.BuildFinished
 import jo.codeide.tooling.protocol.BuildInput
 import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
+import jo.codeide.tooling.protocol.BuildScriptsResult
 import jo.codeide.tooling.protocol.BuildStarted
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.ClasspathEntry
@@ -728,6 +729,13 @@ class GradleApiImpl
                 }
 
                 is ClasspathResult -> {
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
+                // P1 (ADR 0095) : réponse asynchrone aux scripts de build —
+                // la promesse est levée par l'appelant (P2), le routeur ne
+                // fait que compléter.
+                is BuildScriptsResult -> {
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 
