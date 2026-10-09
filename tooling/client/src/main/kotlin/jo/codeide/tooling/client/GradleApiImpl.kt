@@ -659,9 +659,10 @@ class GradleApiImpl
          * une branche par TYPE d'événement du protocole (le contrat complet
          * de l'orchestrateur), chacune déléguée d'une ligne : un aiguillage
          * plat, pas de la logique imbriquée — l'éclater déplacerait le
-         * problème.
+         * problème. LongMethod : même raison — un plat d'aiguillage, pas
+         * du code métier.
          */
-        @Suppress("CyclomaticComplexMethod")
+        @Suppress("CyclomaticComplexMethod", "LongMethod")
         private fun router(
             evenement: ToolingEvent,
             voieBuild: Channel<ToolingEvent>,
@@ -738,6 +739,20 @@ class GradleApiImpl
                 // la promesse est levée par l'appelant (P2), le routeur ne
                 // fait que compléter.
                 is BuildScriptsResult -> {
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
+                // P4 (ADR 0095) : arbre des dépendances résolues — la
+                // promesse est levée par l'appelant (UI P4), le routeur ne
+                // fait que compléter.
+                is jo.codeide.tooling.protocol.ResolvedDependenciesResult -> {
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
+                // P5 (ADR 0095) : variantes de build — la promesse est
+                // levée par l'appelant (UI P5), le routeur ne fait que
+                // compléter.
+                is jo.codeide.tooling.protocol.BuildVariantsResult -> {
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 

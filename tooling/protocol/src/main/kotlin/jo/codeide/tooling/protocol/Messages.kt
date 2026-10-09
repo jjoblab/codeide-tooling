@@ -574,6 +574,132 @@ public data class BuildScriptsResult(
     public val scripts: List<BuildScriptInfo>,
 ) : ToolingEvent
 
+// ---------------------------------------------------------------------------
+// P4 — Dépendances résolues (ADR 0095).
+// ---------------------------------------------------------------------------
+
+/**
+ * Demande l'arbre des dépendances RÉSOLUES (P4, ADR 0095).
+ *
+ * Contrairement à [DependenciesRequest] (liste plate des dépendances
+ * inter-projets), `ResolvedDependenciesRequest` retourne l'arbre
+ * complet d'une configuration donnée : chaque dépendance y porte sa
+ * version demandée vs retenue (conflits), sa raison de sélection et
+ * ses dépendances transitives.
+ *
+ * @property projectDir répertoire racine du projet Gradle.
+ * @property module chemin Gradle du module (ex. `:app`, `:lib`).
+ * @property configuration configuration à résoudre (ex.
+ *        `releaseRuntimeClasspath`, `debugCompileClasspath`).
+ */
+@Serializable
+@SerialName("resolved_dependencies_request")
+public data class ResolvedDependenciesRequest(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val module: String,
+    public val configuration: String,
+) : ToolingRequest
+
+/** Type d'un nœud de dépendance résolue (P4). */
+@Serializable
+public enum class ResolvedDependencyKind {
+    /** Bibliothèque externe (jar/aar). */
+    @SerialName("library")
+    LIBRARY,
+
+    /** Module frère du projet. */
+    @SerialName("project")
+    PROJECT,
+
+    /** Fichier local (jar `files(...)`). */
+    @SerialName("file")
+    FILE,
+}
+
+/**
+ * Un nœud de l'arbre des dépendances résolues (P4).
+ *
+ * @property group groupe Maven (vide pour un module frère).
+ * @property name nom du module ou de l'artefact.
+ * @property versionDemandee version déclarée dans le script (`+` si
+ *         dynamique, vide si inconnue).
+ * @property versionRetenue version EFFECTIVEMENT retenue après résolution
+ *         Gradle (peut différer de [versionDemandee] en cas de conflit).
+ * @property configuration nom de la configuration d'origine.
+ * @property type type du nœud (bibliothèque, module, fichier).
+ * @property raison raison de sélection (ex. `between-versions` pour
+ *         un conflit résolu par Gradle — cf. rapport `dependencyInsight`).
+ * @property transitives dépendances transitives (résolution récursive).
+ */
+@Serializable
+@SerialName("resolved_dependency_node")
+public data class ResolvedDependencyNode(
+    public val group: String,
+    public val name: String,
+    public val versionDemandee: String,
+    public val versionRetenue: String,
+    public val configuration: String,
+    public val type: ResolvedDependencyKind,
+    public val raison: String,
+    public val transitives: List<ResolvedDependencyNode>,
+)
+
+/** Réponse de [ResolvedDependenciesRequest] (P4). */
+@Serializable
+@SerialName("resolved_dependencies_result")
+public data class ResolvedDependenciesResult(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val module: String,
+    public val configuration: String,
+    public val racine: List<ResolvedDependencyNode>,
+) : ToolingEvent
+
+// ---------------------------------------------------------------------------
+// P5 — Variantes de build (ADR 0095).
+// ---------------------------------------------------------------------------
+
+/**
+ * Demande les variantes de build d'un projet (P5, ADR 0095).
+ *
+ * Expose l'arbre module × build type × product flavor connu d'AGP via
+ * la Tooling API (modèle `AndroidProject`). La variante courante est
+ * mémorisée par l'app et utilisée par `BuildRequest` et
+ * `ClasspathRequest`.
+ */
+@Serializable
+@SerialName("build_variants_request")
+public data class BuildVariantsRequest(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+) : ToolingRequest
+
+/** Une variante de build d'un module (P5). */
+@Serializable
+@SerialName("build_variant_info")
+public data class BuildVariantInfo(
+    public val module: String,
+    public val buildType: String,
+    public val productFlavors: Map<String, String>,
+    /** Nom complet de la variante (ex. `debug`, `release`,
+     * `paidDebug` — concaténation AGP). */
+    public val name: String,
+)
+
+/** Réponse de [BuildVariantsRequest] (P5). */
+@Serializable
+@SerialName("build_variants_result")
+public data class BuildVariantsResult(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+    public val variants: List<BuildVariantInfo>,
+) : ToolingEvent
+
 /** Demande un modèle de la Tooling API (projet, IDE générique…). */
 @Serializable
 @SerialName("model_request")
