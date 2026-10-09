@@ -18,6 +18,7 @@ import jo.codeide.core.domain.InstantaneTas
 import jo.codeide.core.domain.LigneSortieBuild
 import jo.codeide.core.domain.LigneSortieSync
 import jo.codeide.core.domain.ResultatSynchronisation
+import jo.codeide.core.domain.ScriptDeBuild
 import jo.codeide.core.domain.StatutBuild
 import jo.codeide.core.domain.StatutTache
 import jo.codeide.core.domain.TelechargementBuild
@@ -28,6 +29,7 @@ import jo.codeide.tooling.protocol.BuildFinished
 import jo.codeide.tooling.protocol.BuildInput
 import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
+import jo.codeide.tooling.protocol.BuildScriptsRequest
 import jo.codeide.tooling.protocol.BuildScriptsResult
 import jo.codeide.tooling.protocol.BuildStarted
 import jo.codeide.tooling.protocol.CancelRequest
@@ -974,6 +976,41 @@ class GradleApiImpl
             }
         }
 
+        override suspend fun scriptsBuild(projectDir: File): AppResult<List<ScriptDeBuild>> {
+            val reponse =
+                echanger(
+                    BuildScriptsRequest(
+                        id = nouvelIdentifiant(),
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        projectDir = projectDir.canonicalPath,
+                    ),
+                    delaiMs = DELAI_SCRIPTS_BUILD_MS,
+                ) ?: return echecConnexion()
+            return when (reponse) {
+                is BuildScriptsResult -> {
+                    AppResult.Success(
+                        reponse.scripts.map { script ->
+                            ScriptDeBuild(
+                                cheminRelatif = script.cheminRelatif,
+                                contenu = script.contenu,
+                                tailleOctets = script.tailleOctets,
+                            )
+                        },
+                    )
+                }
+
+                is ErrorResponse -> {
+                    AppResult.Failure(reponse.versErreurDomaine())
+                }
+
+                else -> {
+                    AppResult.Failure(
+                        AppError.Tooling(ToolingReason.Internal, "réponse inattendue : ${reponse::class.simpleName}"),
+                    )
+                }
+            }
+        }
+
         override suspend fun build(
             projectDir: File,
             tasks: List<String>,
@@ -1369,6 +1406,9 @@ class GradleApiImpl
 
             /** Délai client du classpath LSP (ADR 0058, aligné serveur). */
             const val DELAI_CLASSPATH_MS: Long = 5 * 60_000L
+
+            /** Délai client de lecture des scripts de build (P1, ADR 0095). */
+            const val DELAI_SCRIPTS_BUILD_MS: Long = 15_000L
 
             /** Étiquette des résumés de latence (mesure console, v0.43.0). */
             const val TAG_LATENCE = "ConsoleLatence"
