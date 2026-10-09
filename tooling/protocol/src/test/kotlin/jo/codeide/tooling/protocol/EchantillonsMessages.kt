@@ -37,6 +37,8 @@ internal object EchantillonsMessages {
             ClasspathRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo", arguments = listOf("--offline")),
             ModelRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             CancelRequest(ID_REQUETE, VERSION, buildId = "build-7"),
+            BuildInput(ID_REQUETE, VERSION, buildId = "build-7", texte = "println(\"hello\")"),
+            BuildScriptsRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             HeapRequest(ID_REQUETE, VERSION),
             PingMessage(ID_REQUETE, VERSION),
         )
