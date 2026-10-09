@@ -3,6 +3,7 @@ package jo.codeide.tooling.server
 import jo.codeide.tooling.protocol.BuildInput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.BuildScriptsRequest
+import jo.codeide.tooling.protocol.BuildVariantsRequest
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.ClasspathRequest
 import jo.codeide.tooling.protocol.DependenciesRequest
@@ -15,6 +16,7 @@ import jo.codeide.tooling.protocol.ModelRequest
 import jo.codeide.tooling.protocol.PingMessage
 import jo.codeide.tooling.protocol.PongMessage
 import jo.codeide.tooling.protocol.ProtocolJson
+import jo.codeide.tooling.protocol.ResolvedDependenciesRequest
 import jo.codeide.tooling.protocol.SyncRequest
 import jo.codeide.tooling.protocol.TasksRequest
 import jo.codeide.tooling.protocol.ToolingRequest
@@ -59,6 +61,8 @@ internal class MessageDispatcher(
     private val classpaths = ClasspathHandler(pool, bus, cacheSync)
     private val tas = HeapMonitor(bus)
     private val scriptsBuild = BuildScriptsHandler(bus)
+    private val dependancesResolues = ResolvedDependenciesHandler(bus)
+    private val variantesBuild = BuildVariantsHandler(bus)
 
     /** Boucle de réception — retourne à la fin de connexion. */
     fun boucle() {
@@ -106,6 +110,14 @@ internal class MessageDispatcher(
 
                 is BuildScriptsRequest -> {
                     scriptsBuild.scripts(requete)
+                }
+
+                is ResolvedDependenciesRequest -> {
+                    dependancesResolues.resoudre(requete)
+                }
+
+                is BuildVariantsRequest -> {
+                    variantesBuild.variantes(requete)
                 }
 
                 is SyncRequest,

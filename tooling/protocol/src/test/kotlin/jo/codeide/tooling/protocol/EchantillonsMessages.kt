@@ -39,6 +39,14 @@ internal object EchantillonsMessages {
             CancelRequest(ID_REQUETE, VERSION, buildId = "build-7"),
             BuildInput(ID_REQUETE, VERSION, buildId = "build-7", texte = "println(\"hello\")"),
             BuildScriptsRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
+            ResolvedDependenciesRequest(
+                ID_REQUETE,
+                VERSION,
+                projectDir = "/projets/demo",
+                module = ":app",
+                configuration = "debugRuntimeClasspath",
+            ),
+            BuildVariantsRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             HeapRequest(ID_REQUETE, VERSION),
             PingMessage(ID_REQUETE, VERSION),
         )
@@ -180,6 +188,61 @@ internal object EchantillonsMessages {
                             cheminRelatif = "gradle/libs.versions.toml",
                             contenu = "[versions]\nkotlin = \"2.2.10\"",
                             tailleOctets = 36,
+                        ),
+                    ),
+            ),
+            // P4 (ADR 0095) : arbre des dépendances résolues d'un module ×
+            // configuration, avec transitives et raisons.
+            ResolvedDependenciesResult(
+                ID_EVENEMENT,
+                VERSION,
+                projectDir = "/projets/demo",
+                module = ":app",
+                configuration = "debugRuntimeClasspath",
+                racine =
+                    listOf(
+                        ResolvedDependencyNode(
+                            group = "androidx.core",
+                            name = "core-ktx",
+                            versionDemandee = "1.13.1",
+                            versionRetenue = "1.13.1",
+                            configuration = "implementation",
+                            type = ResolvedDependencyKind.LIBRARY,
+                            raison = "",
+                            transitives =
+                                listOf(
+                                    ResolvedDependencyNode(
+                                        group = "androidx.annotation",
+                                        name = "annotation",
+                                        versionDemandee = "",
+                                        versionRetenue = "1.8.0",
+                                        configuration = "implementation",
+                                        type = ResolvedDependencyKind.LIBRARY,
+                                        raison = "between-versions",
+                                        transitives = emptyList(),
+                                    ),
+                                ),
+                        ),
+                    ),
+            ),
+            // P5 (ADR 0095) : variantes de build exposées par AGP TAPI.
+            BuildVariantsResult(
+                ID_EVENEMENT,
+                VERSION,
+                projectDir = "/projets/demo",
+                variants =
+                    listOf(
+                        BuildVariantInfo(
+                            module = ":app",
+                            buildType = "debug",
+                            productFlavors = emptyMap(),
+                            name = "debug",
+                        ),
+                        BuildVariantInfo(
+                            module = ":app",
+                            buildType = "release",
+                            productFlavors = emptyMap(),
+                            name = "release",
                         ),
                     ),
             ),

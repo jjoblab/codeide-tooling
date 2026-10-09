@@ -1,0 +1,1 @@
+{"type":"build_variants_result","id":"evt-43","protocolVersion":7,"projectDir":"/projets/demo","variants":[{"module":":app","buildType":"debug","productFlavors":{},"name":"debug"},{"module":":app","buildType":"release","productFlavors":{},"name":"release"}]}
