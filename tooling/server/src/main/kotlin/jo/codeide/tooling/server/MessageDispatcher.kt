@@ -61,7 +61,7 @@ internal class MessageDispatcher(
     private val classpaths = ClasspathHandler(pool, bus, cacheSync)
     private val tas = HeapMonitor(bus)
     private val scriptsBuild = BuildScriptsHandler(bus)
-    private val dependancesResolues = ResolvedDependenciesHandler(bus)
+    private val dependancesResolues = ResolvedDependenciesHandler(pool, bus)
     private val variantesBuild = BuildVariantsHandler(bus)
 
     /** Boucle de réception — retourne à la fin de connexion. */
