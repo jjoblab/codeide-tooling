@@ -41,3 +41,6 @@ dist/
 # assets est un ARTEFACT DE BUILD régénéré par :tooling:server:copierJarVersAssets
 # (branché sur preBuild de l'app) — jamais une source versionnée.
 app/src/main/assets/tooling/
+# Mission « Exécuter » R2 (ADR 0103) : l'AAR applog-runtime + son POM sont
+# des ARTEFACTS DE BUILD régénérés par :applog-runtime:copierAarVersAssets.
+app/src/main/assets/applog/

@@ -35,10 +35,21 @@ import kotlin.coroutines.resumeWithException
  * garderait un réglage riche empoisonnerait la console avec des codes ANSI
  * — explicite plutôt qu'implicite, et valable pour TOUT client du
  * protocole, présent ou futur.
+ *
+ * v0.83.0 (R2) : l'injection applog voyage par script d'init Gradle
+ * (ADR 0103) — `-I <script>` devant `--console=plain`.
+ *
+ * Exemption detekt ciblée (règle 16) : TooManyFunctions — R2 ajoute la
+ * seule fonction argumentsInitAppLog au-dessus du seuil ; les fonctions
+ * de BuildHandler sont toutes des pièces du MÊME cycle de build (lancer,
+ * annuler, alimenter stdin, publier la fin), les regrouper nuirait au flot.
  */
+@Suppress("TooManyFunctions")
 internal class BuildHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
+    /** Script d'init Gradle de l'injection applog (R2, ADR 0103) — `null` : aucun. */
+    private val scriptInitAppLog: String? = null,
 ) {
     /** Publication de la progression du build (statuts, écouteur,
      *  diagnostics stderr) — v0.45.1 : extraite, la classe pompait. */
@@ -246,7 +257,11 @@ internal class BuildHandler(
         return connexion
             .newBuild()
             .forTasks(*requete.tasks.toTypedArray())
-            .withArguments(requete.arguments + CONSOLE_TEXTE)
+            // v0.82.0 (R2, ADR 0103) : l'injection applog voyage par
+            // script d'init — argument -I devant --console=plain (la
+            // DERNIÈRE occurrence d'une option gagne chez Gradle, et le
+            // mode texte doit rester le dernier mot de NOTRE contrat).
+            .withArguments(requete.arguments + argumentsInitAppLog() + CONSOLE_TEXTE)
             // v0.39.1 (correctif n°4) : l'observateur du flux stdout allume
             // l'accumulateur de conclusion (synthèse + durée Gradle) dès
             // qu'il voit les lignes de fin. Comme l'observateur est appelé
@@ -381,4 +396,11 @@ internal class BuildHandler(
         /** Taille du tampon stdin (v0.41.1 — 4 Ko suffit pour readln). */
         const val TAILLE_TAMPON_STDIN = 4096
     }
+
+    /**
+     * Arguments d'injection applog du build (R2, ADR 0103) : `-I <script>`
+     * quand le script existe — liste vide sinon (aucun changement pour
+     * les projets si l'injection est coupée).
+     */
+    private fun argumentsInitAppLog(): List<String> = scriptInitAppLog?.let { listOf("-I", it) } ?: emptyList()
 }

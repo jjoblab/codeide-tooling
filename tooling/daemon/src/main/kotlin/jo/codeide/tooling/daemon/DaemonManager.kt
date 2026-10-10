@@ -64,6 +64,11 @@ import java.util.UUID
  * @param delaiSanteMs délai d'expiration d'un pong (§5.4 : 15 s).
  * @param delaiRelanceMs attente entre deux tentatives (repli exponentiel
  * léger : doublée à chaque échec, bornée).
+ * @param deployeurAppLog déployeur du dépôt maven applog-runtime (mission
+ * « Exécuter » R2, ADR 0103) — `null` en test pour couper l'injection.
+ * @param lectureInjectionAppLog decision (suspend) du réglage utilisateur :
+ * lue à CHAQUE lancement du process, le serveur reçoit `--applog-repo`
+ * seulement si elle est vraie.
  */
 @Suppress("LongParameterList")
 class DaemonManager
@@ -80,6 +85,8 @@ class DaemonManager
         private val intervalleSanteMs: Long = GradleProtocol.HEARTBEAT_INTERVAL_MS,
         private val delaiSanteMs: Long = GradleProtocol.HEARTBEAT_TIMEOUT_MS,
         private val delaiRelanceMs: Long = DELAI_RELANC_E_MS,
+        private val deployeurAppLog: DepotAppLogDeployer? = null,
+        private val lectureInjectionAppLog: suspend () -> Boolean = { true },
     ) {
         /** Surveillance en cours (null = daemon arrêté). */
         private var surveillance: Job? = null
@@ -228,6 +235,7 @@ class DaemonManager
          * non typé) avec son traitement propre ; même justification que
          * le Handshake de G2.
          */
+
         @Suppress("ThrowsCount")
         private suspend fun tentative(java: File): Boolean {
             val jar =
@@ -242,9 +250,12 @@ class DaemonManager
 
             val secret = GenerateurSecret.nouveau()
             hote.ouvrir()
+
             val process =
                 lanceur.launch(
-                    command = fabriqueCommande(java, jar, hote.cheminSocket, secret),
+                    command =
+                        fabriqueCommande(java, jar, hote.cheminSocket, secret) +
+                            argumentsAppLog(deciderDepotAppLog()),
                     extraEnv = emptyMap(),
                     workingDir = null,
                 )
@@ -312,6 +323,31 @@ class DaemonManager
                 hote.fermer()
                 api.fermerSession()
                 porteeTentative.cancel()
+            }
+        }
+
+        /**
+         * Décision du dépôt maven applog (mission « Exécuter » R2,
+         * ADR 0103) : déployé et passé au serveur seulement si le réglage
+         * utilisateur l'autorise — lecture à CHAQUE lancement, un
+         * changement s'applique à la prochaine vie de l'orchestrateur.
+         *
+         * @return la racine du dépôt, ou `null` (injection coupée ou
+         *         indisponible — un BONUS ne bloque JAMAIS le serveur).
+         */
+        @Suppress("SwallowedException")
+        private suspend fun deciderDepotAppLog(): File? {
+            if (deployeurAppLog == null || !lectureInjectionAppLog()) {
+                return null
+            }
+            return try {
+                deployeurAppLog.deployer()
+            } catch (indisponible: IOException) {
+                // SwallowedException ciblée : assets absents (installation
+                // corrompue) — l'injection est un BONUS, le serveur part
+                // SANS elle, journalisé (jamais avalée en silence).
+                journal.w(TAG, indisponible) { "dépôt applog indisponible : ${indisponible.message}" }
+                null
             }
         }
 
@@ -502,6 +538,15 @@ internal fun commandeParDefaut(): (java: File, jar: File, cheminSocket: File, se
             "INFO",
         )
     }
+
+/**
+ * Arguments d'injection applog de la commande du process orchestrateur
+ * (mission « Exécuter » R2, ADR 0103) : `--applog-repo <chemin>` quand le
+ * dépôt est déployé — liste vide sinon (le serveur ne génère alors AUCUN
+ * script d'init : les builds de l'utilisateur restent intouchés).
+ */
+internal fun argumentsAppLog(depot: File?): List<String> =
+    depot?.let { listOf("--applog-repo", it.absolutePath) } ?: emptyList()
 
 /**
  * Tas maximum du process orchestrateur (Mio) — TOUJOURS apposé avec son

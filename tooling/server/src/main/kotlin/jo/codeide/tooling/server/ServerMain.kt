@@ -51,7 +51,14 @@ public object ServerMain {
 
         val pool = GradleConnectorPool()
         val bus = EventBusSocket(socket)
-        val dispatcher = MessageDispatcher(socket, pool, bus, config.intervalleTasMs)
+        val dispatcher =
+            MessageDispatcher(
+                socket,
+                pool,
+                bus,
+                config.intervalleTasMs,
+                genererScriptAppLog(config)?.absolutePath,
+            )
 
         Runtime.getRuntime().addShutdownHook(
             Thread {
@@ -84,6 +91,27 @@ public object ServerMain {
             socket.fermer()
         }
     }
+
+    /**
+     * Script d'init de l'injection applog (mission « Exécuter » R2,
+     * ADR 0103) : généré une fois par vie du serveur, à côté du socket
+     * (répertoire privé de l'app) — `null` si le réglage utilisateur
+     * coupe l'injection (aucun `--applog-repo` passé au serveur).
+     */
+    private fun genererScriptAppLog(config: ServerConfig): java.io.File? =
+        config.depotAppLog?.let { depot ->
+            val cible =
+                java.io.File(config.cheminSocket).parentFile?.let { parent ->
+                    java.io.File(parent, jo.codeide.tooling.protocol.ApplogCoordonnees.NOM_SCRIPT_INIT)
+                }
+            cible?.also {
+                GenerateurScriptAppLog.ecrire(
+                    it,
+                    java.io.File(depot),
+                    jo.codeide.tooling.protocol.ApplogCoordonnees.COORDONNEE,
+                )
+            }
+        }
 
     /** Point d'entrée process : convertit le code de [executer] en arrêt. */
     @JvmStatic

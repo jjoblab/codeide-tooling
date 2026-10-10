@@ -9,9 +9,11 @@ import dagger.hilt.components.SingletonComponent
 import jo.codeide.core.domain.AppLogger
 import jo.codeide.core.domain.DispatcherProvider
 import jo.codeide.core.domain.NativeProcessLauncher
+import jo.codeide.core.domain.SettingsRepository
 import jo.codeide.core.domain.ToolchainLocator
 import jo.codeide.tooling.client.GradleApiImpl
 import jo.codeide.tooling.client.GradleSocketServer
+import kotlinx.coroutines.flow.first
 import java.io.File
 import javax.inject.Singleton
 
@@ -33,6 +35,9 @@ internal object ModuleDaemon {
 
     /** Sous-répertoire privé du JAR déployé et de son marqueur. */
     private const val DOSSIER_JAR = "tooling"
+
+    /** Sous-répertoire privé du dépôt maven applog (mission Exécuter R2). */
+    private const val DOSSIER_APPLOG = "applog-repo"
 
     /**
      * Hôte de l'écoute production : `GradleSocketServer` de tooling:client
@@ -60,6 +65,26 @@ internal object ModuleDaemon {
         dispatchers: DispatcherProvider,
     ): JarDeployer = JarDeployer(sourceJar(context), dossierJar(context), dispatchers)
 
+    /** Source du dépôt applog : les assets de l'app (ADR 0103). */
+    @Provides
+    @Singleton
+    internal fun sourceAppLog(
+        @ApplicationContext context: Context,
+    ): SourceAppLog = SourceAppLogAssets(context)
+
+    /**
+     * Déployeur du dépôt maven applog (mission « Exécuter » R2,
+     * ADR 0103) : AAR + POM des assets vers `filesDir/applog-repo`
+     * en disposition maven — le dépôt local que le script d'init du
+     * serveur ajoute aux réglages de résolution.
+     */
+    @Provides
+    @Singleton
+    internal fun deployeurAppLog(
+        source: SourceAppLog,
+        @ApplicationContext context: Context,
+    ): DepotAppLogDeployer = DepotAppLogDeployer(source, File(context.filesDir, DOSSIER_APPLOG))
+
     /**
      * Le daemon lui-même — les coutures de test (fabrique de commande,
      * cadences) prennent leurs valeurs de production ici.
@@ -78,6 +103,8 @@ internal object ModuleDaemon {
         api: GradleApiImpl,
         hote: HoteSocketTooling,
         deployeur: JarDeployer,
+        deployeurAppLog: DepotAppLogDeployer,
+        parametres: SettingsRepository,
         journal: AppLogger,
         dispatchers: DispatcherProvider,
     ): DaemonManager =
@@ -89,6 +116,12 @@ internal object ModuleDaemon {
             deployeur = deployeur,
             journal = journal,
             dispatchers = dispatchers,
+            deployeurAppLog = deployeurAppLog,
+            // Réglage utilisateur lu à CHAQUE lancement du process : un
+            // changement s'applique à la prochaine vie de l'orchestrateur
+            // (redémarrage de l'app ou de la chaîne d'outils) — dit tel
+            // quel dans l'écran des réglages.
+            lectureInjectionAppLog = { parametres.observeSettings().first().injectionAppLog },
         )
 
     /** Répertoire privé `filesDir/run` (socket, supprimé du cache). */

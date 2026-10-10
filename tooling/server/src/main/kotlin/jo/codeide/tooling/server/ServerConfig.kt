@@ -8,12 +8,19 @@ package jo.codeide.tooling.server
  * ne transite QUE par cet argument (§4.4 : jamais écrit sur disque, jamais
  * loggé en clair). `--log-level` borne la verbosité du [Journal] ;
  * `--heap-intervalle-ms` pilote le [HeapMonitor] (0 = désactivé, §4.6).
+ *
+ * `--applog-repo <chemin>` (mission « Exécuter » R2, ADR 0103) : chemin du
+ * dépôt maven local de la bibliothèque applog-runtime, déployé par le
+ * daemon dans filesDir. ABSENT = injection désactivée (le réglage
+ * utilisateur de CodeIDE coupe l'argument à la source — un serveur
+ * démarré sans lui ne génère aucun script d'init).
  */
 internal data class ServerConfig(
     val cheminSocket: String,
     val secret: String,
     val niveauJournal: NiveauJournal,
     val intervalleTasMs: Long,
+    val depotAppLog: String? = null,
 ) {
     /** Niveaux de journalisation de l'orchestrateur. */
     enum class NiveauJournal {
@@ -29,7 +36,8 @@ internal data class ServerConfig(
         /** Usage imprimé sur la sortie d'erreur en cas d'arguments invalides. */
         const val USAGE =
             "usage : --socket <chemin> --secret <secret> " +
-                "[--log-level INFO|WARN|ERROR] [--heap-intervalle-ms <n>]"
+                "[--log-level INFO|WARN|ERROR] [--heap-intervalle-ms <n>] " +
+                "[--applog-repo <chemin>]"
 
         /**
          * Analyse les arguments de lancement. [IllegalArgumentException]
@@ -47,6 +55,7 @@ internal data class ServerConfig(
             var secret: String? = null
             var niveau = NiveauJournal.INFO
             var intervalleTas = INTERVALLE_TAS_MS_DEFAUT
+            var depotAppLog: String? = null
 
             var i = 0
             while (i < args.size) {
@@ -84,6 +93,11 @@ internal data class ServerConfig(
                         i += 2
                     }
 
+                    "--applog-repo" -> {
+                        depotAppLog = valeur(args, i)
+                        i += 2
+                    }
+
                     else -> {
                         throw IllegalArgumentException("Argument inconnu : ${args[i]}")
                     }
@@ -96,6 +110,7 @@ internal data class ServerConfig(
                 secret = requireNotNull(secret) { "Argument obligatoire manquant : --secret <secret>" },
                 niveauJournal = niveau,
                 intervalleTasMs = intervalleTas,
+                depotAppLog = depotAppLog,
             )
         }
 

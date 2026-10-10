@@ -65,6 +65,8 @@ class DaemonManagerTest {
         delaiRelanceMs: Long = 1L,
         intervalleSanteMs: Long = 50L,
         delaiSanteMs: Long = 250L,
+        deployeurAppLog: DepotAppLogDeployer? = null,
+        lectureInjectionAppLog: suspend () -> Boolean = { true },
     ): DaemonManager =
         DaemonManager(
             lanceur = lanceur,
@@ -80,6 +82,8 @@ class DaemonManagerTest {
             intervalleSanteMs = intervalleSanteMs,
             delaiSanteMs = delaiSanteMs,
             delaiRelanceMs = delaiRelanceMs,
+            deployeurAppLog = deployeurAppLog,
+            lectureInjectionAppLog = lectureInjectionAppLog,
         )
 
     /** Démarre le daemon dans sa portée de test et l'enregistre pour le nettoyage. */
@@ -313,6 +317,82 @@ class DaemonManagerTest {
                 commande,
             )
         }
+
+    // ------------------------------------------------------------------
+    // Mission « Exécuter » R2 (ADR 0103) : l'argument --applog-repo du
+    // process orchestrateur — présent quand l'injection est activée,
+    // ABSENT sinon (le serveur ne génère alors aucun script d'init).
+    // ------------------------------------------------------------------
+
+    /** Source applog en mémoire (couture — même contrat que les assets). */
+    private val sourceAppLogMemoire =
+        object : SourceAppLog {
+            override fun flux(nom: String): java.io.InputStream =
+                java.io.ByteArrayInputStream(
+                    when (nom) {
+                        jo.codeide.tooling.protocol.ApplogCoordonnees.NOM_AAR -> ByteArray(32)
+                        jo.codeide.tooling.protocol.ApplogCoordonnees.NOM_POM -> "<pom/>".toByteArray()
+                        else -> throw java.io.FileNotFoundException(nom)
+                    },
+                )
+        }
+
+    @Test
+    fun `le depot applog deploye ajoute applog-repo a la fin de la commande`() =
+        runBlocking {
+            hote.sessions.addAll(listOf(SessionFacticeDaemon(pongAuto = true)))
+            lanceur.fabrique = { ProcessusMaitrise() }
+            val cible = dossierTemporaire("applog-repo")
+            nouveauDaemon(
+                deployeurAppLog = DepotAppLogDeployer(sourceAppLogMemoire, cible),
+                lectureInjectionAppLog = { true },
+            ).demarrerEnTest()
+
+            attendreQue { api.etatConnexion == EtatConnexion.CONNECTEE }
+
+            val commande = lanceur.lancements[0].command
+            val indice = commande.indexOf("--applog-repo")
+            assertTrue("la commande devait porter --applog-repo", indice >= 0)
+            assertEquals(
+                "le chemin du dépôt suit l'argument",
+                cible.canonicalFile.absolutePath,
+                File(commande[indice + 1]).canonicalFile.absolutePath,
+            )
+            // Le dépôt est RÉELLEMENT déployé avant le lancement.
+            assertTrue(
+                cible.resolve("jo/codeide/applog-runtime/1.0.0").isDirectory,
+            )
+        }
+
+    @Test
+    fun `reglage coupe ou deployeur absent la commande reste inchangée`() =
+        runBlocking {
+            hote.sessions.addAll(listOf(SessionFacticeDaemon(pongAuto = true)))
+            lanceur.fabrique = { ProcessusMaitrise() }
+            val cible = dossierTemporaire("applog-repo")
+            nouveauDaemon(
+                deployeurAppLog = DepotAppLogDeployer(sourceAppLogMemoire, cible),
+                lectureInjectionAppLog = { false },
+            ).demarrerEnTest()
+
+            attendreQue { api.etatConnexion == EtatConnexion.CONNECTEE }
+
+            assertTrue(
+                "réglage coupé : aucun --applog-repo",
+                "--applog-repo" !in lanceur.lancements[0].command,
+            )
+            // Rien déployé non plus : l'injection coupée ne touche pas disque.
+            assertTrue(cible.resolve("jo").exists().not())
+        }
+
+    @Test
+    fun `argumentsAppLog produit la paire ou rien`() {
+        assertEquals(emptyList<String>(), argumentsAppLog(null))
+        assertEquals(
+            listOf("--applog-repo", "/donnees/applog-repo"),
+            argumentsAppLog(File("/donnees/applog-repo")),
+        )
+    }
 
     @Test
     fun `l argument de tas de la commande production est accepte par une vraie JVM`() {
