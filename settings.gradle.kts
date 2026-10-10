@@ -35,6 +35,12 @@ rootProject.name = "CodeIDE"
 
 include(":app")
 
+// Mission « Exécuter » R2 (ADR 0103) : bibliothèque de débogage Java pure
+// injectée dans les builds debug des projets de l'utilisateur — zéro
+// dépendance, zéro permission, jamais active hors debug. L'AAR est un
+// artefact de build recopié vers les assets de l'app (copierAarVersAssets).
+include(":applog-runtime")
+
 // Socle transverse.
 include(":core:model")
 include(":core:domain")

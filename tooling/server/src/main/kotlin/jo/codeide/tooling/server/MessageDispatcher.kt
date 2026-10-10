@@ -48,11 +48,13 @@ internal class MessageDispatcher(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
     private val intervalleTasMs: Long,
+    /** Script d'init Gradle de l'injection applog (R2) — `null` = aucun. */
+    private val scriptInitAppLog: String? = null,
 ) {
     /** Portée bornée des requêtes (§4.5 : jamais bloquer la lecture). */
     private val porteeRequetes = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(PARALLELISME))
 
-    private val builds = BuildHandler(pool, bus)
+    private val builds = BuildHandler(pool, bus, scriptInitAppLog)
     private val cacheSync = CacheSync()
     private val synchronisations = SyncHandler(pool, bus, cacheSync)
     private val taches = TasksHandler(pool, bus, cacheSync)
