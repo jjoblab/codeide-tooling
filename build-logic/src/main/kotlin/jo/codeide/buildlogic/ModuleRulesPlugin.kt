@@ -146,6 +146,12 @@ class ModuleRulesPlugin : Plugin<Project> {
         // l'adaptateur de production suivra le même schéma (:lsp:host,
         // étape 4).
         chemin == ":lsp:testing" -> setOf(":lsp:java", ":lsp:index", ":lsp:model")
+        // Étape 4 (ADR 0109) : l'HÔTE consomme le moteur vendored (le
+        // branche, ne le modifie pas), l'index disque (adaptateur de
+        // production de la SPI IndexNoms) et le modèle (conversion
+        // ClasspathResult v8, ADR 0113/0058) — c'est le point UNIQUE de
+        // changement de transport D2 (in-process par défaut, cel-lsp).
+        chemin == ":lsp:host" -> setOf(":lsp:java", ":lsp:index", ":lsp:model")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")

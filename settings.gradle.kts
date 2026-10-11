@@ -102,3 +102,9 @@ include(":lsp:index")
 include(":lsp:java")
 include(":lsp:ecj-art")
 include(":lsp:testing")
+// :lsp:host (étape 4, ADR 0109) : l'HÔTE — SessionLsp (transport abstrait
+// D2, in-process ART par défaut), orchestrateur sync → modèle → index →
+// moteurs par module (API qualifiée lot E), adaptateur production de la
+// SPI IndexNoms, état d'indexation pour l'UI. Point unique de changement
+// de transport.
+include(":lsp:host")
