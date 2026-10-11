@@ -136,6 +136,10 @@ androidx-material = { group = "com.google.android.material", name = "material", 
 # dans une feature (prompt compagnon, section 3) — embarque cel-core et
 # cel-lsp-api en transitif.
 codeeditor-ui = { group = "com.github.jjoblab.code-editor", name = "cel-ui", version.ref = "code-editor" }
+# cel-lsp (mission « LSP Java » étape 4, §10) : intégration des serveurs de
+# langage à l'éditeur (LspProject/LspEditor, transport in-process) — réservé
+# à :lsp:hôte, PAS aux features (cel-ui reste la seule exception feature).
+codeeditor-lsp = { group = "com.github.jjoblab.code-editor", name = "cel-lsp", version.ref = "code-editor" }
 termux-terminal-emulator = { group = "com.github.termux.termux-app", name = "terminal-emulator", version.ref = "termux" }
 termux-terminal-view = { group = "com.github.termux.termux-app", name = "terminal-view", version.ref = "termux" }
 
