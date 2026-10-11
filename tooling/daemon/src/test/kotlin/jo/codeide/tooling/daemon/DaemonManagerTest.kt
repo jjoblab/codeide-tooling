@@ -443,6 +443,49 @@ class DaemonManagerTest {
             attendreQue { api.etatConnexion == EtatConnexion.ECHOUEE }
             assertEquals(0, lanceur.lancements.size)
             assertTrue(journal.entries.any { it.message.contains("indisponible") })
+            // v0.99.1 : l'échec définitif est explicite — l'asset en cause
+            // ET la conduite à tenir (réinstallation) sont dans le journal.
+            assertTrue(journal.entries.any { it.message.contains("réinstaller") })
+        }
+
+    @Test
+    fun `un echec d ecriture du JAR consomme les tentatives puis echoue`() =
+        runBlocking {
+            // v0.99.1 (journal de terrain « <chemin>: The source file
+            // doesn't exist. ») : un échec CÔTÉ STOCKAGE (répertoire
+            // incréable) est RETENTABLE — l'ancien code le déclarait
+            // définitif du premier coup, la boucle de vie doit épuiser
+            // ses tentatives comme pour tout lancement impossible.
+            val parent = dossierTemporaire("deploy-cible-morte-parent")
+            parent.mkdirs()
+            val bloquant = File(parent, "fichier-bloquant")
+            bloquant.writeText("bloque la création du répertoire")
+            val deployeurBloque =
+                JarDeployer(
+                    source = SourceJarMemoire(CONTENU_JAR),
+                    dossierCible = File(bloquant, "tooling"),
+                    dispatchers = DispatchersIoDirect(),
+                )
+            val daemon =
+                DaemonManager(
+                    lanceur = lanceur,
+                    outilchain = outils,
+                    api = api,
+                    hote = hote,
+                    deployeur = deployeurBloque,
+                    journal = journal,
+                    dispatchers = DispatchersIoDirect(),
+                    delaiRelanceMs = 1L,
+                )
+            daemon.demarrerEnTest()
+
+            attendreQue { api.etatConnexion == EtatConnexion.ECHOUEE }
+            // Aucun lancement (le déploiement échoue AVANT le process), et
+            // l'échec est journalisé comme TENTATIVE CONSOMMÉE, pas comme
+            // « indisponible » définitif.
+            assertEquals(0, lanceur.lancements.size)
+            assertTrue(journal.entries.any { it.message.contains("tentative consommée") })
+            assertTrue(journal.entries.any { it.message.contains("incréable") })
         }
 
     @Test

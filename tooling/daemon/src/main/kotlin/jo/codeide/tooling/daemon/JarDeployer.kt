@@ -46,6 +46,53 @@ internal class SourceJarAssets(
 }
 
 /**
+ * Échec typé du déploiement du JAR orchestrateur (v0.99.1 — retour
+ * utilisateur « JAR orchestrateur indisponible : <chemin>: The source
+ * file doesn't exist. »).
+ *
+ * Le déploiement échoue de TROIS façons distinctes, aux conséquences
+ * opposées pour la boucle de vie ([DaemonManager]) :
+ *
+ * - [SourceJarIndisible] — l'ASSET est illisible (absent de l'APK ou
+ *   corrompu) : réinstaller l'app est la seule issue, échec DÉFINITIF ;
+ * - [CibleInaccessible] — le répertoire de déploiement est incréable
+ *   (mkdirs en échec, état transitoire du stockage) : RETENTABLE —
+ *   l'état du disque peut changer entre deux tentatives ;
+ * - [EcritureImpossible] — copie/renommage/marqueur en échec (disque
+ *   plein, permissions) : RETENTABLE pour la même raison.
+ *
+ * Chaque sous-classe porte un message FRANÇAIS explicite (chemin en
+ * cause + cause originale) : le journal de l'échec est ACTIONNABLE,
+ * pas un « The source file doesn't exist. » sans contexte.
+ */
+internal sealed class EchecDeploiementJar(
+    message: String,
+    cause: Throwable?,
+) : IOException(message, cause) {
+    /** L'asset source est illisible — installation corrompue : définitif. */
+    internal class SourceJarIndisible(
+        cause: Throwable,
+    ) : EchecDeploiementJar(
+            "asset $CHEMIN_ASSET_JAR illisible (installation corrompue ? réinstaller l'app) : ${cause.message}",
+            cause,
+        )
+
+    /** Le répertoire cible est incréable : retentable. */
+    internal class CibleInaccessible(
+        chemin: File,
+    ) : EchecDeploiementJar("répertoire de déploiement incréable : $chemin", null)
+
+    /** Écriture, remplacement ou marqueur en échec : retentable. */
+    internal class EcritureImpossible(
+        message: String,
+        cause: Throwable?,
+    ) : EchecDeploiementJar(message, cause)
+}
+
+/** Chemin du JAR dans les assets (miroir de [SourceJarAssets]). */
+private const val CHEMIN_ASSET_JAR = "tooling/${GradleProtocol.SERVER_JAR_NAME}"
+
+/**
  * Déploiement du JAR orchestrateur des assets vers le stockage privé
  * (§5.4, « JarDeployer à marqueur de version »).
  *
@@ -59,6 +106,12 @@ internal class SourceJarAssets(
  * un redémarrage d'app sur un JAR inchangé ne recopie rien. La copie est
  * atomique (`.tmp` puis renommage) : un process concurrent qui lirait
  * l'ancien JAR pendant la mise à jour voit toujours un fichier complet.
+ *
+ * **v0.99.1** : tout échec est TYÉ ([EchecDeploiementJar]) — répertoire
+ * cible créé AVANT toute écriture (le `mkdirs()` d'origine ignorait son
+ * résultat : un répertoire incréable produisait en cascade une
+ * `FileNotFoundException` ENOENT sans contexte — journal de terrain
+ * « <chemin>: The source file doesn't exist. », indéchiffrable).
  *
  * @property dossierCible répertoire de déploiement (`filesDir/tooling`).
  */
@@ -79,34 +132,65 @@ internal class JarDeployer(
      * Déploie le JAR si la source a changé, retourne son chemin.
      *
      * @return chemin du JAR exécutable, déjà en place.
-     * @throws IOException lecture de la source ou écriture impossible —
-     * l'appelant (DaemonManager) traduit en échec typé.
+     * @throws EchecDeploiementJar échec typé — [EchecDeploiementJar.SourceJarIndisible]
+     *   (définitif) ou CibleInaccessible/EcritureImpossible (retentables) ;
+     *   l'appelant ([DaemonManager]) décide selon le type.
      */
     suspend fun deployer(): File =
         withContext(dispatchers.io) {
-            if (!dossierCible.isDirectory) {
-                dossierCible.mkdirs()
+            // v0.99.1 : la création du répertoire est VERIFIÉE — un
+            // échec silencieux produisait en cascade un ENOENT obscur
+            // sur le `.tmp` (le « The source file doesn't exist. » de
+            // terrain, sans chemin ni cause).
+            if (!dossierCible.isDirectory && !dossierCible.mkdirs()) {
+                throw EchecDeploiementJar.CibleInaccessible(dossierCible)
             }
-            val empreinte = empreinteSource()
+            val empreinte =
+                try {
+                    empreinteSource()
+                } catch (lecture: IOException) {
+                    throw EchecDeploiementJar.SourceJarIndisible(lecture)
+                }
             if (jar.isFile && marqueur.isFile && marqueur.readText() == empreinte) {
                 return@withContext jar
             }
 
             val temporaire = File(dossierCible, "${GradleProtocol.SERVER_JAR_NAME}.tmp")
-            source.flux().use { entree ->
-                temporaire.outputStream().use { sortie ->
-                    entree.copyTo(sortie, TAILLE_TAMPON)
+            try {
+                source.flux().use { entree ->
+                    temporaire.outputStream().use { sortie ->
+                        entree.copyTo(sortie, TAILLE_TAMPON)
+                    }
                 }
+            } catch (transfert: IOException) {
+                // La source a pu s'ouvrir pour l'empreinte puis mourir en
+                // cours de copie : les deux côtés sont couverts — une
+                // écriture partiale du `.tmp` reste SANS effet (jamais
+                // renommée), le prochain déploiement la réécrit.
+                throw EchecDeploiementJar.EcritureImpossible(
+                    "copie du JAR impossible vers ${temporaire.absolutePath} : ${transfert.message}",
+                    transfert,
+                )
             }
             if (jar.isFile && !jar.delete()) {
-                throw IOException("impossible de remplacer l'ancien JAR : ${jar.absolutePath}")
+                throw EchecDeploiementJar.EcritureImpossible(
+                    "impossible de remplacer l'ancien JAR : ${jar.absolutePath}",
+                    null,
+                )
             }
             if (!temporaire.renameTo(jar)) {
                 // Filesystem sans renommage fiable (rare) : repli par copie.
                 temporaire.copyTo(jar, overwrite = true)
                 temporaire.delete()
             }
-            marqueur.writeText(empreinte)
+            try {
+                marqueur.writeText(empreinte)
+            } catch (ecriture: IOException) {
+                throw EchecDeploiementJar.EcritureImpossible(
+                    "marqueur de version incréable : ${marqueur.absolutePath} (${ecriture.message})",
+                    ecriture,
+                )
+            }
             jar
         }
 

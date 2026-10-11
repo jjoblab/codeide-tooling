@@ -228,24 +228,23 @@ class DaemonManager
          * le tuyau pendant la fenêtre de connexion — échec muet).
          *
          * @return `true` pour un échec DÉFINITIF (sans nouvelle tentative).
-         *
-         * Exemption detekt ciblée (règle 16) : ThrowsCount — chaque `throw`
-         * distingue une cause DIFFÉRENTE (délai de connexion, annulation de
-         * la surveillance, refus de handshake, échec IO de l'hôte, échec
-         * non typé) avec son traitement propre ; même justification que
-         * le Handshake de G2.
          */
-
-        @Suppress("ThrowsCount")
         private suspend fun tentative(java: File): Boolean {
             val jar =
                 try {
                     deployeur.deployer()
                 } catch (indisponible: IOException) {
-                    // Asset absent ou disque plein : re-essayer ne changera
-                    // rien avant une réinstallation — définitif.
-                    journal.e(TAG) { "JAR orchestrateur indisponible : ${indisponible.message}" }
-                    return true
+                    // v0.99.1 : la classification (définitif vs retentable)
+                    // vit dans [deploiementEstDefinitif] — l'échec RETENTABLE
+                    // (cible/écriture) est RELANCÉ : la boucle consomme une
+                    // tentative et repart avec son back-off.
+                    if (deploiementEstDefinitif(journal, TAG, indisponible)) {
+                        return true
+                    }
+                    journal.w(TAG, indisponible) {
+                        "déploiement du JAR impossible (${indisponible.message}) — tentative consommée"
+                    }
+                    throw indisponible
                 }
 
             val secret = GenerateurSecret.nouveau()
@@ -268,9 +267,51 @@ class DaemonManager
             // émission, session ou pas.
             val collecteurs = brancherSorties(process, porteeTentative)
 
-            val session: SessionTooling
+            val session = attendreConnexion(process, hote, porteeTentative, collecteurs, secret)
+
+            api.ouvrirSession(session)
+            journal.i(TAG) { "orchestrateur connecté (jar ${jar.name})" }
+
+            val surveillanceSante = porteeTentative.launch { sonderSante(process, session) }
             try {
-                session = hote.accepterUneFois(secret, FENETRE_CONNEXION_MS)
+                val code = process.awaitExit()
+                journal.i(TAG) { "orchestrateur arrêté (code $code)" }
+                // Code 2 = arguments invalides : NOTRE ligne de commande est
+                // fausse — re-essayer identique est vain. Les autres codes
+                // (0 fin de connexion, 3 connexion, 4 refus de l'app) sont
+                // des états de l'environnement : la boucle décide.
+                return code == CODE_ARGUMENTS_INVALIDES
+            } finally {
+                surveillanceSante.cancel()
+                // Nettoyage SYNCHRONE (leçon T2) : kill/fermer/fermerSession
+                // ne suspendent jamais — la coroutine peut être annulée.
+                process.kill(force = true)
+                hote.fermer()
+                api.fermerSession()
+                porteeTentative.cancel()
+            }
+        }
+
+        /**
+         * Attend la connexion de l'orchestrateur (accept unique, fenêtre
+         * [FENETRE_CONNEXION_MS] — extraite de [tentative] en v0.99.1 pour
+         * la garder lisible).
+         *
+         * Exemption detekt ciblée (règle 16) : ThrowsCount — chaque
+         * `throw` distingue une cause DIFFÉRENTE (délai de connexion,
+         * annulation de la surveillance, refus de handshake, échec IO de
+         * l'hôte, échec non typé) avec son traitement propre.
+         */
+        @Suppress("ThrowsCount")
+        private suspend fun attendreConnexion(
+            process: ManagedProcess,
+            hote: HoteSocketTooling,
+            porteeTentative: CoroutineScope,
+            collecteurs: List<Job>,
+            secret: String,
+        ): SessionTooling =
+            try {
+                hote.accepterUneFois(secret, FENETRE_CONNEXION_MS)
             } catch (delai: TimeoutCancellationException) {
                 // L'orchestrateur n'a jamais joint l'écoute dans le délai
                 // (hôte JVM de test, canal NIO interruptible) : tentative
@@ -302,29 +343,6 @@ class DaemonManager
                 nettoyerApresConnexionManquee(process, hote, porteeTentative, collecteurs)
                 throw IOException("aucune connexion de l'orchestrateur : ${perdu.message}", perdu)
             }
-
-            api.ouvrirSession(session)
-            journal.i(TAG) { "orchestrateur connecté (jar ${jar.name})" }
-
-            val surveillanceSante = porteeTentative.launch { sonderSante(process, session) }
-            try {
-                val code = process.awaitExit()
-                journal.i(TAG) { "orchestrateur arrêté (code $code)" }
-                // Code 2 = arguments invalides : NOTRE ligne de commande est
-                // fausse — re-essayer identique est vain. Les autres codes
-                // (0 fin de connexion, 3 connexion, 4 refus de l'app) sont
-                // des états de l'environnement : la boucle décide.
-                return code == CODE_ARGUMENTS_INVALIDES
-            } finally {
-                surveillanceSante.cancel()
-                // Nettoyage SYNCHRONE (leçon T2) : kill/fermer/fermerSession
-                // ne suspendent jamais — la coroutine peut être annulée.
-                process.kill(force = true)
-                hote.fermer()
-                api.fermerSession()
-                porteeTentative.cancel()
-            }
-        }
 
         /**
          * Décision du dépôt maven applog (mission « Exécuter » R2,
@@ -505,6 +523,42 @@ class DaemonManager
             const val DELAI_RELANC_E_MAX_MS = 10_000L
         }
     }
+
+/**
+ * Un échec de déploiement du JAR est-il DÉFINITIF ? (v0.99.1 — retour
+ * utilisateur « JAR orchestrateur indisponible : <chemin>: The source
+ * file doesn't exist. » : un ENOENT nu, sans classe, chemin ni cause —
+ * indéchiffrable.)
+ *
+ * L'échec de SOURCE ([EchecDeploiementJar.SourceJarIndisible] : asset
+ * absent ou corrompu DANS l'APK) l'est : réinstaller l'app est la seule
+ * issue, et le journal le DIT (chemin de l'asset, cause originale,
+ * conduite à tenir). L'échec de CIBLE (répertoire incréable, copie,
+ * marqueur) ne l'est PAS : l'état du stockage PEUT changer entre deux
+ * tentatives — l'ancien code arrêtait tout définitivement sur un simple
+ * échec d'écriture retentable. Un échec non typé (défensif) reste
+ * définitif comme avant, mais le journal porte désormais l'exception
+ * ENTIÈRE (classe + trace), pas un message nu.
+ *
+ * @return `true` pour un échec définitif (journalisé ici) ; `false`
+ *   pour un échec RETENTABLE (l'appelant le relance — la boucle de vie
+ *   consomme une tentative).
+ */
+private fun deploiementEstDefinitif(
+    journal: AppLogger,
+    tag: String,
+    indisponible: IOException,
+): Boolean {
+    val definitif =
+        indisponible !is EchecDeploiementJar ||
+            indisponible is EchecDeploiementJar.SourceJarIndisible
+    if (definitif) {
+        journal.e(tag, indisponible) {
+            "JAR orchestrateur indisponible : ${indisponible.message}"
+        }
+    }
+    return definitif
+}
 
 /**
  * Commande de lancement production : `java` avec tas borné, JAR déployé,

@@ -87,6 +87,47 @@ class JarDeployerTest {
             }
         assertTrue("le déploiement devait échouer par IOException", echec != null)
         assertFalse(File(cible, "gradle-server.jar").isFile)
+        // v0.99.1 : l'échec est TYÉ et ACTIONNABLE — le message porte le
+        // chemin de l'asset ET la cause originale (pas un « The source
+        // file doesn't exist. » nu, inexploitable).
+        assertTrue(
+            "l'échec devait être typé SourceJarIndisible : $echec",
+            echec is EchecDeploiementJar.SourceJarIndisible,
+        )
+        assertTrue(echec?.message?.contains("tooling/gradle-server.jar") == true)
+        assertTrue(echec?.message?.contains("réinstaller") == true)
+        assertTrue(echec?.cause is java.io.FileNotFoundException)
+    }
+
+    @Test
+    fun `un repertoire cible increable echoue avec le chemin en clair`() {
+        // v0.99.1 (journal de terrain « <chemin>: The source file doesn't
+        // exist. ») : l'ancien code ignorait le résultat de mkdirs() — un
+        // fichier sur le chemin du répertoire produisait une
+        // FileNotFoundException ENOENT sans contexte sur le `.tmp`.
+        // Désormais : échec TYÉ, chemin complet, retentable.
+        val parent = dossierTemporaire("deploy-parent")
+        parent.mkdirs()
+        val bloquant = File(parent, "outil-fichier")
+        bloquant.writeText("un FICHIER bloque la création du répertoire")
+        val cible = File(bloquant, "sous-dossier")
+        val deployeur = JarDeployer(SourceJarMemoire(ByteArray(64) { 1 }), cible, DispatchersIoDirect())
+
+        val echec =
+            runBlocking {
+                try {
+                    deployeur.deployer()
+                    null
+                } catch (indisponible: IOException) {
+                    indisponible
+                }
+            }
+        assertTrue(
+            "l'échec devait être typé CibleInaccessible : $echec",
+            echec is EchecDeploiementJar.CibleInaccessible,
+        )
+        assertTrue(echec?.message?.contains(cible.absolutePath) == true)
+        assertFalse(File(cible, "gradle-server.jar").isFile)
     }
 
     @Test
@@ -117,6 +158,13 @@ class JarDeployerTest {
                         }
                     }
                 assertTrue("le remplacement devait échouer par IOException", echec != null)
+                // v0.99.1 : échec typé RETENTABLE (l'état du stockage peut
+                // changer — la boucle de vie du daemon consommera une
+                // tentative au lieu de déclarer l'orchestrateur mort).
+                assertTrue(
+                    "l'échec devait être typé EcritureImpossible : $echec",
+                    echec is EchecDeploiementJar.EcritureImpossible,
+                )
                 assertTrue("l'ancien JAR devait rester en place et complet", jar.isFile)
             } finally {
                 cible.setWritable(true)
@@ -136,7 +184,10 @@ private class SourceJarVariable : SourceJarTooling {
     override fun flux(): InputStream = octets.inputStream()
 }
 
-/** Source toujours absente (asset corrompu). */
+/** Source toujours absente (asset corrompu) — le message EXACT que
+ *  l'AssetManager d'Android produit pour un asset manquant (AOSP
+ *  AssetManager.open : FileNotFoundException("Asset file: <nom>")) —
+ *  v0.99.1 : le déploiement doit l'envelopper en échec typé. */
 internal class SourceJarAbsent : SourceJarTooling {
-    override fun flux(): InputStream = throw IOException("asset tooling/gradle-server.jar introuvable")
+    override fun flux(): InputStream = throw java.io.FileNotFoundException("Asset file: tooling/gradle-server.jar")
 }
