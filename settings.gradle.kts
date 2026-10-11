@@ -92,8 +92,13 @@ include(":tooling:testing")
 // la requête, format binaire versionné, construction en arrière-plan) ;
 // :lsp:java — moteur vendored Java
 // (ecj patché pour ART, exemption Kotlin documentée par l'ADR 0108) ;
-// :lsp:ecj-art — patcher ASM build-time (jamais dans l'APK).
+// :lsp:ecj-art — patcher ASM build-time (jamais dans l'APK) ;
+// :lsp:testing — suite d'intégration moteur ↔ index (v0.96.3, pattern
+// :tooling:testing : les tests du branchement vivent AU-DESSUS des deux
+// modules — le moteur vendored ne dépend d'AUCUN module interne, test
+// compris, ADR 0108, vérifié par checkModuleDependencies).
 include(":lsp:model")
 include(":lsp:index")
 include(":lsp:java")
 include(":lsp:ecj-art")
+include(":lsp:testing")

@@ -76,13 +76,15 @@ class ModuleRulesPlugin : Plugin<Project> {
         )
 
         /** Modules Kotlin JVM purs (section 5.1 ; Tooling, section 2.1/2.2 ;
-         * LSP Java, prompt 2 §7 — lsp:model et lsp:index en Kotlin,
-         * lsp:java et lsp:ecj-art modules JVM vendored Java, ADR 0108). */
+         * LSP Java, prompt 2 §7 — lsp:model, lsp:index et lsp:testing en
+         * Kotlin/Java JVM purs, lsp:java et lsp:ecj-art modules JVM
+         * vendored Java, ADR 0108). */
         val MODULES_PURS =
             setOf(
                 ":core:model", ":core:domain",
                 ":tooling:protocol", ":tooling:api", ":tooling:server",
                 ":lsp:model", ":lsp:index", ":lsp:java", ":lsp:ecj-art",
+                ":lsp:testing",
             )
 
         /** Plugins Android interdits aux modules purs. */
@@ -134,6 +136,16 @@ class ModuleRulesPlugin : Plugin<Project> {
         chemin == ":lsp:index" -> setOf(":lsp:model", ":tooling:protocol")
         chemin == ":lsp:java" -> emptySet()
         chemin == ":lsp:ecj-art" -> emptySet()
+        // Étape 3 lot C (v0.96.3) : la suite d'intégration moteur ↔ index
+        // vit AU-DESSUS des deux modules qu'elle éprouve (pattern
+        // :tooling:testing — dépendance de test uniquement) : :lsp:testing
+        // consomme le moteur vendored ET l'index disque à travers la SPI
+        // publique IndexNoms. La CI a rejeté le testImplementation posé
+        // DANS :lsp:java au lot C (section 5.2, ADR 0108 — le module
+        // vendored ne dépend d'AUCUN module interne, test compris) ;
+        // l'adaptateur de production suivra le même schéma (:lsp:host,
+        // étape 4).
+        chemin == ":lsp:testing" -> setOf(":lsp:java", ":lsp:index", ":lsp:model")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")
