@@ -87,9 +87,13 @@ include(":tooling:testing")
 // Mission « LSP Java » (prompt 2, section 7 et ADR 0108-0112) :
 // :lsp:model — modèle de projet LSP en Kotlin JVM pur (étape 1 :
 // conversion ClasspathResult → snapshots immuables empreintés,
-// persistance versionnée validée) ; :lsp:java — moteur vendored Java
+// persistance versionnée validée) ; :lsp:index — index disque en
+// segments par jar (étape 2, ADR 0111 : clés de contenu, fusion LSM à
+// la requête, format binaire versionné, construction en arrière-plan) ;
+// :lsp:java — moteur vendored Java
 // (ecj patché pour ART, exemption Kotlin documentée par l'ADR 0108) ;
 // :lsp:ecj-art — patcher ASM build-time (jamais dans l'APK).
 include(":lsp:model")
+include(":lsp:index")
 include(":lsp:java")
 include(":lsp:ecj-art")
