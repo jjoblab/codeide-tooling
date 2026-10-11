@@ -21,6 +21,13 @@ dependencies {
     // docs/TOOLING.md — les métadonnées Maven Central sont périmées).
     api(libs.gradle.tooling.api)
 
+    // Mission « LSP Java » étape 1 (ADR 0113) : interfaces du modèle v2
+    // d'AGP (BasicAndroidProject, AndroidProject, VariantDependencies,
+    // ModelBuilderParameter) résolu via la Tooling API pour la source du
+    // classpath des modules Android. Version alignée sur l'AGP (même train
+    // de versions) ; petite (~300 Ko) dans le JAR orchestrateur.
+    implementation(libs.android.builder.model)
+
     // Coroutines JVM (§4.3 : pont callbacks → coroutines) — variante JVM,
     // pas la variante Android (§4.7).
     implementation(libs.kotlinx.coroutines.core)

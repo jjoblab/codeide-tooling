@@ -268,19 +268,35 @@ internal object EchantillonsMessages {
                                             "/cache/modules-2/files-2.1/org.jetbrains.kotlin/kotlin-stdlib/2.2.10/" +
                                                 "kotlin-stdlib-2.2.10-sources.jar",
                                     ),
+                                    // v8 (ADR 0113) : AAR livré NORMALISÉ —
+                                    // jar extrait par les transforms du
+                                    // cache Gradle, AAR d'origine en
+                                    // provenance.
                                     ClasspathEntry(
-                                        path = "/cache/modules-2/files-2.1/androidx.core/core/1.17.0/core-1.17.0.aar",
-                                        kind = ClasspathKind.AAR,
+                                        path =
+                                            "/cache/9.7.1/transforms/91d8547094a6bf7615ba0dae817fc867/transformed/" +
+                                                "core-1.17.0/jars/classes.jar",
+                                        kind = ClasspathKind.JAR,
                                         scope = "compile",
+                                        aar = "/cache/modules-2/files-2.1/androidx.core/core/1.17.0/core-1.17.0.aar",
                                     ),
                                 ),
+                            // v8 : sourcesets de TEST séparés (W5).
+                            sourceDirsTest = listOf("/projets/demo/app/src/test/java"),
                             // v0.40.1 (prompt de suivi §4) : statistiques par
                             // module pré-calculées côté serveur.
-                            nbJars = 1,
+                            nbJars = 2,
                             nbAars = 1,
                             nbSources = 1,
                             varianteAndroid = "debug",
                             nbDependancesProjet = 1,
+                            // v8 : champs remplis par le modèle v2 AGP.
+                            fichiersGeneres =
+                                listOf("/projets/demo/app/build/generated/ap_generated_sources/debug/out"),
+                            androidJar = "/sdk/platforms/android-37.0/android.jar",
+                            ignore = false,
+                            raisonIgnore = null,
+                            avertissements = emptyList(),
                         ),
                     ),
             ),

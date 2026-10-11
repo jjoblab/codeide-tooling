@@ -1,7 +1,5 @@
 package jo.codeide.tooling.server
 
-import jo.codeide.tooling.protocol.ClasspathEntry
-import jo.codeide.tooling.protocol.ClasspathKind
 import jo.codeide.tooling.protocol.ClasspathModule
 import jo.codeide.tooling.protocol.TaskInfo
 import java.util.concurrent.ConcurrentHashMap
@@ -32,28 +30,9 @@ internal class CacheSync {
                     taches.map { dto ->
                         TaskInfo(path = dto.path, group = dto.group, displayName = dto.displayName)
                     },
-                modules =
-                    modules.map { dto ->
-                        ClasspathModule(
-                            name = dto.name,
-                            sourceDirs = dto.sourceDirs,
-                            entries =
-                                dto.entries.map { entree ->
-                                    ClasspathEntry(
-                                        path = entree.path,
-                                        kind =
-                                            when (entree.kind) {
-                                                "MODULE" -> ClasspathKind.MODULE
-                                                "DOSSIER" -> ClasspathKind.DOSSIER
-                                                "AAR" -> ClasspathKind.AAR
-                                                else -> ClasspathKind.JAR
-                                            },
-                                        scope = entree.scope,
-                                        sources = entree.sources,
-                                    )
-                                },
-                        )
-                    },
+                // v8 : la traduction DTO → protocole est PARTAGÉE avec le
+                // ClasspathHandler (ConversionClasspath) — plus de doublon.
+                modules = modules.map { it.versClasspathModule() },
             )
     }
 

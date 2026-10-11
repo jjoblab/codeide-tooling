@@ -17,6 +17,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.gradle.tooling.events.OperationType
+import org.gradle.tooling.model.idea.IdeaProject
 import java.io.File
 
 /**
@@ -277,7 +278,31 @@ internal class SyncHandler(
             // rendu, même discipline que le canal Build).
             executer.setStandardOutput(StreamingFluxSync(requete.projectDir, StreamKind.STDOUT, bus))
             executer.setStandardError(StreamingFluxSync(requete.projectDir, StreamKind.STDERR, bus))
-            executer.run()
+            val resultatAction = executer.run()
+
+            // v8 (ADR 0113) : IdeaProject — modules JVM purs — par le
+            // MODEL BUILDER APRÈS l'action (les dépendances typées
+            // IdeaModuleDependency/IdeaSingleEntryLibraryDependency
+            // n'existent pas dans une action : l'adaptateur côté démon ne
+            // proxifie que l'interface de base — cf. ModelesSync). Le
+            // démon est déjà configuré, l'aller est peu coûteux ; la phase
+            // MODELE_IDE (ouverte par le marqueur de l'action) couvre
+            // aussi cette résolution. Mêmes arguments et mêmes écouteurs.
+            val modulesIdea =
+                connexion
+                    .model(IdeaProject::class.java)
+                    .withArguments(requete.arguments + CONSOLE_TEXTE)
+                    .addProgressListener(
+                        ecouteur,
+                        OperationType.FILE_DOWNLOAD,
+                        OperationType.PROJECT_CONFIGURATION,
+                    ).addProgressListener(ecouteurStatut)
+                    .get()
+                    .versModulesDto()
+            ResultatModelesSync(
+                taches = resultatAction.taches,
+                modules = fusionner(modulesIdea, resultatAction.modulesAndroid),
+            )
         }
     }
 

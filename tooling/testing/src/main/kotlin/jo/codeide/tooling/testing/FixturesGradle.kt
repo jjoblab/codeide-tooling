@@ -26,6 +26,9 @@ public object FixturesGradle {
             "erreur-compilation",
             "multi-module",
             "tache-longue",
+            // Mission « LSP Java » étape 1 : projet ANDROID réel (AGP),
+            // le cas que les fixtures pur JVM ne couvraient pas.
+            "android-simple",
         )
 
     /**

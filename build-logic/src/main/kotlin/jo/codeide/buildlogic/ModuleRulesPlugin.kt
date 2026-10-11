@@ -75,11 +75,14 @@ class ModuleRulesPlugin : Plugin<Project> {
             "kspAndroidTest",
         )
 
-        /** Modules Kotlin JVM purs (section 5.1 ; Tooling, section 2.1/2.2). */
+        /** Modules Kotlin JVM purs (section 5.1 ; Tooling, section 2.1/2.2 ;
+         * LSP Java, prompt 2 §7 — lsp:model en Kotlin, lsp:java et
+         * lsp:ecj-art modules JVM vendored Java, ADR 0108). */
         val MODULES_PURS =
             setOf(
                 ":core:model", ":core:domain",
                 ":tooling:protocol", ":tooling:api", ":tooling:server",
+                ":lsp:model", ":lsp:java", ":lsp:ecj-art",
             )
 
         /** Plugins Android interdits aux modules purs. */
@@ -121,6 +124,14 @@ class ModuleRulesPlugin : Plugin<Project> {
         chemin == ":tooling:daemon" ->
             setOf(":tooling:protocol", ":core:domain", ":tooling:client")
         chemin == ":tooling:testing" -> setOf(":tooling:protocol", ":tooling:api")
+        // Mission « LSP Java » (prompt 2 §7) : lsp:model ne dépend que du
+        // protocole (conversion pure ClasspathResult → snapshots, extractibilité
+        // du moteur préservée) ; lsp:java (vendored) et lsp:ecj-art (patcher
+        // build-time) ne dépendent d'AUCUN module interne — extractibilité
+        // bibliothèque indépendante (ADR 0108/0110).
+        chemin == ":lsp:model" -> setOf(":tooling:protocol")
+        chemin == ":lsp:java" -> emptySet()
+        chemin == ":lsp:ecj-art" -> emptySet()
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")

@@ -92,6 +92,22 @@ javax-inject = "1"
 # AGP l'ajoute automatiquement aux modules qui activent viewBinding, core:ui la déclare explicitement).
 viewbinding = "9.4.1"
 
+# Mission « LSP Java » (prompt 2 — versions du module vendored lsp-java, vérifiées sur
+# les dépôts officiels le 2026-10-11 : Maven Central pour jdt/lsp4j/gson/asm/junit-jupiter,
+# Google Maven pour builder-model qui suit le train de versions de l'AGP).
+eclipse-jdt-core = "3.40.0"
+lsp4j = "0.21.2"
+gson = "2.10.1"
+asm = "9.7"
+junit-jupiter = "5.10.1"
+# La version du lanceur suit la version de la PLATEFORME JUnit (1.10.x
+# pour Jupiter 5.10.x), pas celle de Jupiter.
+junit-platform = "1.10.1"
+# builder-model (com.android.tools.build) : interfaces du modèle v2 d'AGP résolu via
+# la Tooling API — même train de versions que l'AGP (9.4.1), vérifié sur Google Maven.
+# Compatible avec les projets cibles AGP 8+ (les interfaces v2 sont stables depuis 8.0).
+builder-model = "9.4.1"
+
 [libraries]
 # AndroidX de base.
 androidx-annotation = { group = "androidx.annotation", name = "annotation", version.ref = "androidx-annotation" }
@@ -145,6 +161,19 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 # Tooling Gradle (G2) : orchestrateur Tooling API (tooling:server uniquement).
 gradle-tooling-api = { group = "org.gradle", name = "gradle-tooling-api", version.ref = "gradle-tooling-api" }
+
+# Mission « LSP Java » — moteur vendored :lsp:java (jar Eclipse patché pour ART,
+# lsp4j pour la façade LSP, gson pour les types de l'ancienne couche app) ;
+# :lsp:ecj-art (patcheur ASM du build) ; :lsp:java en JUnit 5 (suite vendored) ;
+# tooling:server consomme builder-model (modèle v2 AGP — étape 1).
+eclipse-jdt-core = { group = "org.eclipse.jdt", name = "org.eclipse.jdt.core", version.ref = "eclipse-jdt-core" }
+lsp4j = { group = "org.eclipse.lsp4j", name = "org.eclipse.lsp4j", version.ref = "lsp4j" }
+gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+asm = { group = "org.ow2.asm", name = "asm", version.ref = "asm" }
+asm-commons = { group = "org.ow2.asm", name = "asm-commons", version.ref = "asm" }
+junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junit-jupiter" }
+junit-platform-launcher = { group = "org.junit.platform", name = "junit-platform-launcher", version.ref = "junit-platform" }
+android-builder-model = { group = "com.android.tools.build", name = "builder-model", version.ref = "builder-model" }
 
 # Tests unitaires JVM.
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
