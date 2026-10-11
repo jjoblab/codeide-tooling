@@ -761,10 +761,18 @@ public data class ClasspathRequest(
  * [kind] vaut [ClasspathKind.MODULE] ; [sources] porte le jar de
  * sources attaché quand Gradle le connaît.
  *
+ * v8 (mission « LSP Java » étape 1, ADR 0113) : les AAR sont livrés
+ * NORMALISÉS — l'entrée porte le chemin du jar EXTRAIT (classes.jar et
+ * jars du dossier `libs`) par les transforms du cache Gradle et [aar]
+ * désigne l'AAR d'origine (provenance, clé d'index future) ; `null` pour
+ * les entrées qui ne proviennent pas d'un AAR.
+ *
  * @property path fichier/dossier concerné, ou nom du module frère.
  * @property kind nature de l'entrée.
  * @property scope portée de la dépendance (`compile`, `test`…), si connue.
  * @property sources jar de sources attaché, `null` si aucun.
+ * @property aar chemin de l'AAR d'origine quand l'entrée provient d'un AAR
+ *           normalisé (v8), `null` sinon.
  */
 @Serializable
 @SerialName("classpath_entry")
@@ -773,6 +781,7 @@ public data class ClasspathEntry(
     public val kind: ClasspathKind,
     public val scope: String? = null,
     public val sources: String? = null,
+    public val aar: String? = null,
 )
 
 /**
@@ -787,8 +796,20 @@ public data class ClasspathEntry(
  * pas ; un serveur nouveau les envoie, un client ancien les ignore via
  * `ignoreUnknownKeys`).
  *
+ * v8 (mission « LSP Java » étape 1, ADR 0113) : [sourceDirs] ne porte
+ * plus que les racines PRINCIPALES du sourceset — les racines de tests
+ * migrent vers [sourceDirsTest] (W5 : main et test ne se mélangent
+ * plus) ; [androidJar], [fichiersGeneres], [varianteAndroid] (variante
+ * RÉELLE du modèle v2 AGP, plus une heuristique de nom),
+ * [ignore]/[raisonIgnore] et [avertissements] sont désormais remplis
+ * par le serveur (module conteneur sans sources, dépendances non
+ * résolues, doublons écartés…).
+ *
  * @property name nom du module Gradle (ex. `:app`).
- * @property sourceDirs répertoires sources absolus.
+ * @property sourceDirs répertoires sources PRINCIPAUX absolus (v8 :
+ *           racines main seulement — tests dans [sourceDirsTest]).
+ * @property sourceDirsTest répertoires sources de TEST absolus (v8) —
+ *           `null` si non calculé (serveur ancien) ; vide si aucun.
  * @property entries entrées du classpath compilé.
  * @property nbJars nombre de JARs résolus (v0.40.1 §4) — `null` si non
  *           calculé par le serveur.
@@ -820,6 +841,7 @@ public data class ClasspathModule(
     public val name: String,
     public val sourceDirs: List<String>,
     public val entries: List<ClasspathEntry>,
+    public val sourceDirsTest: List<String>? = null,
     public val nbJars: Int? = null,
     public val nbAars: Int? = null,
     public val nbSources: Int? = null,

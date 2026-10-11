@@ -44,8 +44,27 @@ public object GradleProtocol {
      * antérieur (le discriminant `type` échoue avant `ignoreUnknownKeys`).
      * Ajout aussi de [BuildScriptsRequest]/[BuildScriptsResult] (P1) et
      * du golden manquant [BuildInput] (correction dette technique v0.41.1).
+     *
+     * v8 (mission « LSP Java » étape 1, ADR 0113) : la source du classpath
+     * est étendue aux modules ANDROID par le modèle v2 d'AGP
+     * (builder-model via Tooling API) — les 26 modules Android du dépôt
+     * de référence livrent enfin sources, classpath et android.jar
+     * (IdeaProject restait vide pour eux). Conséquences sur le contrat :
+     * [ClasspathModule.sourceDirs] ne porte plus que les racines PRINCIPALES
+     * (les racines de TEST migrent vers [ClasspathModule.sourceDirsTest] —
+     * les sourcesets main/test ne se mélangent plus, W5) ; les entrées
+     * d'AAR sont livrées NORMALISÉES en [ClasspathKind.JAR] (jars extraits
+     * par les transforms du cache Gradle, AGP le fait déjà — l'ancienne
+     * livraison d'AAR bruts « telle quelle » d'ADR 0058 est remplacée),
+     * [ClasspathEntry.aar] porte la provenance ; [ClasspathModule.androidJar]
+     * (boot classpath), [ClasspathModule.fichiersGeneres],
+     * [ClasspathModule.varianteAndroid] (variante RÉELLE, plus une
+     * heuristique) et [ClasspathModule.ignore]/[ClasspathModule.avertissements]
+     * sont désormais remplis. Champs optionnels → un client v7 n'est pas
+     * cassé par le décodage, mais le handshake exige l'égalité exacte : les
+     * deux bouts vivant dans le même APK, la sémantique change ensemble.
      */
-    public const val PROTOCOL_VERSION: Int = 7
+    public const val PROTOCOL_VERSION: Int = 8
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"

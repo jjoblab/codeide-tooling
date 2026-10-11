@@ -83,3 +83,13 @@ include(":tooling:server")
 include(":tooling:client")
 include(":tooling:daemon")
 include(":tooling:testing")
+
+// Mission « LSP Java » (prompt 2, section 7 et ADR 0108-0112) :
+// :lsp:model — modèle de projet LSP en Kotlin JVM pur (étape 1 :
+// conversion ClasspathResult → snapshots immuables empreintés,
+// persistance versionnée validée) ; :lsp:java — moteur vendored Java
+// (ecj patché pour ART, exemption Kotlin documentée par l'ADR 0108) ;
+// :lsp:ecj-art — patcher ASM build-time (jamais dans l'APK).
+include(":lsp:model")
+include(":lsp:java")
+include(":lsp:ecj-art")

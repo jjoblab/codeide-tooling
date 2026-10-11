@@ -7,16 +7,17 @@ import org.junit.Test
 import java.nio.file.Files
 
 /**
- * Garde-fous des fixtures (§7.2) : les quatre projets existent réellement
+ * Garde-fous des fixtures (§7.2) : les projets existent réellement
  * en ressources et se copient intégralement vers un répertoire temporaire
  * — un build de test ne doit jamais retomber sur une fixture construite
- * en place.
+ * en place. v0.92.0 : la liste porte la fixture ANDROID (mission « LSP
+ * Java » étape 1, ADR 0113) en cinquième position.
  */
 class FixturesGradleTest {
     @Test
-    fun `les quatre fixtures attendues existent`() {
+    fun `les cinq fixtures attendues existent`() {
         assertEquals(
-            listOf("minimal-java", "erreur-compilation", "multi-module", "tache-longue"),
+            listOf("minimal-java", "erreur-compilation", "multi-module", "tache-longue", "android-simple"),
             FixturesGradle.noms,
         )
     }

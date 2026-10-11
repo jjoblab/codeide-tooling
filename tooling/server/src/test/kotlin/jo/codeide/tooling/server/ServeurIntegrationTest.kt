@@ -5,6 +5,7 @@ import jo.codeide.tooling.protocol.BuildOutput
 import jo.codeide.tooling.protocol.BuildRequest
 import jo.codeide.tooling.protocol.CancelRequest
 import jo.codeide.tooling.protocol.ClasspathKind
+import jo.codeide.tooling.protocol.ClasspathModule
 import jo.codeide.tooling.protocol.ClasspathRequest
 import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.DependenciesRequest
@@ -595,6 +596,95 @@ class ServeurIntegrationTest {
             "la dépendance app → lib devait être dans le classpath : " +
                 appModule.entries.joinToString { "${it.path} (${it.kind})" },
             appModule.entries.any { it.kind == ClasspathKind.MODULE && (it.path.endsWith("lib")) },
+        )
+    }
+
+    @Test
+    fun `le classpath livre les modules android par le modele v2 - etape 1 mission LSP`() {
+        // Fixture AGP RÉELLE (ADR 0113) : le cas que le fixture
+        // multi-module (plugins { java } pur JVM) n'a jamais couvert —
+        // IdeaProject reste VIDE pour les modules Android, seuls les
+        // modèles v2 (BasicAndroidProject, VariantDependencies) livrent
+        // sources, android.jar et dépendances.
+        val sdk = sdkAndroid()
+        org.junit.Assume.assumeTrue("SDK Android requis pour la fixture AGP", sdk != null)
+
+        val app = demarrer()
+        val projet = fixture("android-simple")
+        // local.properties est propre à la machine (AGP exige sdk.dir) —
+        // écrit après la copie, jamais versionné dans la fixture.
+        Files.writeString(projet.resolve("local.properties"), "sdk.dir=$sdk")
+        val identifiant = nouvelId()
+        app.envoyer(
+            ClasspathRequest(
+                id = identifiant,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val resultat = app.attendre(DELAI_BUILD, ClasspathResult::class)
+        assertEquals(identifiant, resultat.id)
+        val modulesParNom = resultat.modules.associateBy { it.name }
+        verifierModuleAndroidApp(modulesParNom)
+        verifierModuleAndroidLib(modulesParNom)
+    }
+
+    /** SDK Android de la machine (ANDROID_HOME, puis le chemin local). */
+    private fun sdkAndroid(): String? =
+        sequenceOf(System.getenv("ANDROID_HOME"), "/home/z/android-sdk")
+            .firstOrNull { chemin -> chemin != null && java.io.File(chemin).isDirectory }
+
+    /** Assertions du module :app de la fixture android-simple (v8). */
+    private fun verifierModuleAndroidApp(modulesParNom: Map<String, ClasspathModule>) {
+        val appModule = modulesParNom.getValue(":app")
+        // W5 : sourcesets main et test SÉPARÉS (v8).
+        assertTrue(
+            "la racine main java de :app devait être livrée : ${appModule.sourceDirs.joinToString()}",
+            appModule.sourceDirs.any { it.endsWith("app/src/main/java") },
+        )
+        assertTrue(
+            "la racine de test de :app devait être livrée : ${appModule.sourceDirsTest.orEmpty().joinToString()}",
+            appModule.sourceDirsTest.orEmpty().any { it.endsWith("app/src/test/java") },
+        )
+        // android.jar (boot classpath du compileSdk) — D5/ADR 0112.
+        assertTrue(
+            "android.jar devait être livré pour :app : ${appModule.androidJar}",
+            appModule.androidJar?.endsWith("android.jar") == true,
+        )
+        assertEquals("debug", appModule.varianteAndroid)
+        // Le classpath de :app porte le module frère :lib (entrée MODULE
+        // par SON chemin, v8) et la bibliothèque externe (jar du cache).
+        assertTrue(
+            "la dépendance :app → :lib devait être dans le classpath : " +
+                appModule.entries.joinToString { "${it.path} (${it.kind})" },
+            appModule.entries.any { it.kind == ClasspathKind.MODULE && it.path == ":lib" },
+        )
+        assertTrue(
+            "commons-io devait être dans le classpath de :app : " +
+                appModule.entries.joinToString { "${it.path} (${it.kind})" },
+            appModule.entries.any { it.kind == ClasspathKind.JAR && it.path.contains("commons-io") },
+        )
+        // La dépendance de test vit avec sa portée.
+        assertTrue(
+            "junit (portée test) devait être dans le classpath de :app : " +
+                appModule.entries.joinToString { "${it.path} (${it.scope})" },
+            appModule.entries.any { it.path.contains("junit") && it.scope == "test" },
+        )
+        // Le module conteneur (racine sans sources ni classpath) est
+        // écarté AVEC sa raison — jamais silencieusement.
+        val racine = modulesParNom[":"]
+        if (racine != null) {
+            assertTrue("le module conteneur devait être ignoré avec sa raison", racine.ignore)
+            assertNotNull(racine.raisonIgnore)
+        }
+    }
+
+    /** Assertions du module :lib de la fixture android-simple (v8). */
+    private fun verifierModuleAndroidLib(modulesParNom: Map<String, ClasspathModule>) {
+        val libModule = modulesParNom.getValue(":lib")
+        assertTrue(
+            "la racine main java de :lib devait être livrée : ${libModule.sourceDirs.joinToString()}",
+            libModule.sourceDirs.any { it.endsWith("lib/src/main/java") },
         )
     }
 
