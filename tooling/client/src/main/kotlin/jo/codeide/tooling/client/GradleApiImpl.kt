@@ -991,6 +991,54 @@ class GradleApiImpl
             }
         }
 
+        /**
+         * Résolution du classpath BRUT — protocole v8 TEL QUEL (mission
+         * « LSP Java » étape 4 lot h2, docs/LSP_JAVA.md §16.2 : « ajouter
+         * l'accesseur protocole côté tooling:client »).
+         *
+         * Hors du port du DOMAINE par DESIN : [classpath] convertit vers
+         * `ClasspathProjet` (`core:domain`, persistance
+         * `lsp-classpath.json`) ; l'HÔTE LSP consomme le RÉSULTAT BRUT
+         * (`ClasspathResult` → `ProjetLsp`, ADR 0113) — deux consommateurs
+         * aux types distincts, une seule requête : le serveur répond
+         * depuis le cache de sync (CacheSync), la résolution n'est payée
+         * qu'une fois.
+         *
+         * Réservé au branchement LSP de l'app (liaison Hilt
+         * `SourceClasspathLsp`) — les features continuent de passer par
+         * l'interface du domaine (règle §2.2).
+         */
+        suspend fun classpathBrut(
+            projectDir: File,
+            arguments: List<String>,
+        ): AppResult<ClasspathResult> {
+            val reponse =
+                echanger(
+                    ClasspathRequest(
+                        id = nouvelIdentifiant(),
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        projectDir = projectDir.canonicalPath,
+                        arguments = arguments,
+                    ),
+                    delaiMs = DELAI_CLASSPATH_MS,
+                ) ?: return echecConnexion()
+            return when (reponse) {
+                is ClasspathResult -> {
+                    AppResult.Success(reponse)
+                }
+
+                is ErrorResponse -> {
+                    AppResult.Failure(reponse.versErreurDomaine())
+                }
+
+                else -> {
+                    AppResult.Failure(
+                        AppError.Tooling(ToolingReason.Internal, "réponse inattendue : ${reponse::class.simpleName}"),
+                    )
+                }
+            }
+        }
+
         override suspend fun scriptsBuild(projectDir: File): AppResult<List<ScriptDeBuild>> {
             val reponse =
                 echanger(

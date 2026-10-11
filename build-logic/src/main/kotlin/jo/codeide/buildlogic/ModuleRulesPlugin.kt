@@ -152,6 +152,16 @@ class ModuleRulesPlugin : Plugin<Project> {
         // ClasspathResult v8, ADR 0113/0058) — c'est le point UNIQUE de
         // changement de transport D2 (in-process par défaut, cel-lsp).
         chemin == ":lsp:host" -> setOf(":lsp:java", ":lsp:index", ":lsp:model")
+        // Étape 4 lot h2 (§16.2) : l'ÉDITEUR consomme l'hôte LSP
+        // (SessionLsp + définition cel-lsp — la surface publique de
+        // :lsp:host, ADR 0109) pour brancher l'EditorView sur le serveur
+        // Java in-process : session par projet, état d'indexation, action
+        // « Réindexer ». Exception feature EXPLICITE au trio
+        // core:ui/domain/model — même esprit que feature:terminal →
+        // core:terminal-runtime (le plein écran consomme le runtime des
+        // sessions ; l'éditeur consomme l'hôte du langage).
+        chemin == ":feature:editor" ->
+            setOf(":core:ui", ":core:domain", ":core:model", ":lsp:host")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")
