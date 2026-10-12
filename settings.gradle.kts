@@ -44,6 +44,12 @@ include(":applog-runtime")
 // Socle transverse.
 include(":core:model")
 include(":core:domain")
+// Mission « Cycle de vie » (prompt 3 §5.1, étape B — ADR 0114) : contrat de
+// session de projet (machine à états observable) et registre de fermeture
+// (Fermable : ordre inverse, délai par élément, drapeau « ne pas annuler »).
+// Kotlin JVM PUR — les adaptateurs des ressources réelles vivront en
+// étape C (feature:editor) et D (tooling).
+include(":core:session")
 include(":core:data")
 include(":core:database")
 include(":core:datastore")
