@@ -25,6 +25,25 @@ dependencyResolutionManagement {
         // coordonnée sont périmées (7.3-snapshot de 2021). Vérifié le
         // 2026-09-24 (voir docs/TOOLING.md).
         maven { url = uri("https://repo.gradle.org/gradle/libs-releases/") }
+        // LSP Kotlin (K1, ADR 0115) : org.jetbrains:syntax-api — l'arbre de
+        // construction syntaxique contre lequel la grammaire vendorée du
+        // compilateur Kotlin est écrite. Pas sur Central (artefact de la
+        // plateforme IntelliJ), publié sur intellij-dependencies ; accès
+        // par le cache-redirector public de JetBrains (plus stable que
+        // packages.jetbrains.team, même contenu). Filtre strict : rien
+        // d'autre ne vient de là.
+        maven {
+            url = uri("https://cache-redirector.jetbrains.com/intellij-dependencies")
+            content {
+                // Le filtre doit admettre les coordonnées RACINES (métadonnées
+                // KMP) ET leurs variantes par cible (-jvm…) — un filtre ne
+                // nommant que la racine résout les métadonnées puis ne
+                // trouve aucun jar. lang-syntax = arbre syntaxique KMP
+                // (SyntaxNode/LeafSyntaxNode) dont syntax-api dépend.
+                includeModuleByRegex("org\\.jetbrains", "syntax-api.*")
+                includeModuleByRegex("org\\.jetbrains", "lang-syntax.*")
+            }
+        }
     }
 }
 
@@ -114,3 +133,10 @@ include(":lsp:testing")
 // SPI IndexNoms, état d'indexation pour l'UI. Point unique de changement
 // de transport.
 include(":lsp:host")
+// :lsp:kotlin (mission « LSP Kotlin », LSP_KOTLIN.md étape K1, ADR 0115) :
+// moteur d'analyse Kotlin in-process — grammaire multiplateforme du
+// compilateur Kotlin VENDORÉE (Apache 2.0, lsp/kotlin/src/main/vendor,
+// zéro modification locale) + façade Kt* + suite de parité. Indépendant de
+// tout module interne (pack « langue » téléchargeable différé — D6 : SPI
+// ServiceLoader jo.lspkotlin.api.MoteurLangageKotlin seul visible).
+include(":lsp:kotlin")

@@ -78,13 +78,14 @@ class ModuleRulesPlugin : Plugin<Project> {
         /** Modules Kotlin JVM purs (section 5.1 ; Tooling, section 2.1/2.2 ;
          * LSP Java, prompt 2 §7 — lsp:model, lsp:index et lsp:testing en
          * Kotlin/Java JVM purs, lsp:java et lsp:ecj-art modules JVM
-         * vendored Java, ADR 0108). */
+         * vendored Java, ADR 0108 ; LSP Kotlin, LSP_KOTLIN.md K1 — lsp:kotlin
+         * en Kotlin JVM pur, grammaire du compilateur vendorée, ADR 0115). */
         val MODULES_PURS =
             setOf(
                 ":core:model", ":core:domain", ":core:session",
                 ":tooling:protocol", ":tooling:api", ":tooling:server",
                 ":lsp:model", ":lsp:index", ":lsp:java", ":lsp:ecj-art",
-                ":lsp:testing",
+                ":lsp:testing", ":lsp:kotlin",
             )
 
         /** Plugins Android interdits aux modules purs. */
@@ -141,6 +142,13 @@ class ModuleRulesPlugin : Plugin<Project> {
         chemin == ":lsp:index" -> setOf(":lsp:model", ":tooling:protocol")
         chemin == ":lsp:java" -> emptySet()
         chemin == ":lsp:ecj-art" -> emptySet()
+        // Mission « LSP Kotlin » (LSP_KOTLIN.md, ADR 0115) : le moteur
+        // vendé (grammaire du compilateur) ne dépend d'AUCUN module
+        // interne — c'est la condition du découplage futur en « pack
+        // langue » téléchargeable (§6, décision D6 : découpage différé,
+        // architecture préservée dès K1 ; l'app ne voit que le SPI
+        // jo.lspkotlin.api.MoteurLangageKotlin par ServiceLoader).
+        chemin == ":lsp:kotlin" -> emptySet()
         // Étape 3 lot C (v0.96.3) : la suite d'intégration moteur ↔ index
         // vit AU-DESSUS des deux modules qu'elle éprouve (pattern
         // :tooling:testing — dépendance de test uniquement) : :lsp:testing
