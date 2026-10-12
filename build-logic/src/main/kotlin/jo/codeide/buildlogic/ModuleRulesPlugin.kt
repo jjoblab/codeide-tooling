@@ -164,7 +164,12 @@ class ModuleRulesPlugin : Plugin<Project> {
         // production de la SPI IndexNoms) et le modèle (conversion
         // ClasspathResult v8, ADR 0113/0058) — c'est le point UNIQUE de
         // changement de transport D2 (in-process par défaut, cel-lsp).
-        chemin == ":lsp:host" -> setOf(":lsp:java", ":lsp:index", ":lsp:model")
+        // K2 (LSP_KOTLIN.md §5) : + :lsp:kotlin — l'adaptateur LSP4J de la
+        // session Kotlin vit dans l'hôte, le moteur ne voit que le SPI
+        // MoteurLangageKotlin (D6 : api, jamais l'implémentation — le pack
+        // « langue » futur reste découplable).
+        chemin == ":lsp:host" ->
+            setOf(":lsp:java", ":lsp:index", ":lsp:model", ":lsp:kotlin")
         // Étape 4 lot h2 (§16.2) : l'ÉDITEUR consomme l'hôte LSP
         // (SessionLsp + définition cel-lsp — la surface publique de
         // :lsp:host, ADR 0109) pour brancher l'EditorView sur le serveur

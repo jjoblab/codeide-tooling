@@ -103,11 +103,15 @@ shadow = "9.6.1"
 
 # Divers.
 javax-inject = "1"
-# Previews (PE1, PREVIEW.md P2) : moteur de rendu XML LayoutLib — dépôt
-# jjoblab/LayoutLib (le même auteur que CodeIDE), dépendance Maven
-# versionnée via JitPack. v2.1.1 = premier tag publiable (recette jitpack.yml
-# + maven-publish appliquée, commit 6c56ab8) ; la mise à jour = bump ici.
-layoutlib = "v2.1.2"
+# Previews (PE1, PREVIEW.md P2 révisée 2026-10-13) : moteur de rendu XML
+# LayoutLib — dépôt personnel jjoblab/LayoutLib du propriétaire, GitHub-only
+# (AUCUNE publication JitPack, décision propriétaire). Intégration en SOURCE
+# par build composite : les coordonnées com.github.jjoblab.LayoutLib:* sont
+# SUBSTITUÉES par les projets du checkout frère (settings.gradle.kts). La
+# version = PIN INFORMATIF du ref git attendu (tag v2.2.0, aligné toolchain
+# CodeIDE) ; la substitution ignore la version déclarée — la mise à jour =
+# bump ici + ref du clonage CI.
+layoutlib = "2.2.0"
 
 # Interface ViewBinding pour core:ui (même version que l'AGP, vérifié sur Google Maven ;
 # AGP l'ajoute automatiquement aux modules qui activent viewBinding, core:ui la déclare explicitement).
@@ -207,8 +211,8 @@ jetbrains-syntax-api = { group = "org.jetbrains", name = "syntax-api", version.r
 jetbrains-annotations = { group = "org.jetbrains", name = "annotations", version.ref = "jetbrains-annotations" }
 
 # Mission « Previews » (PE1) : moteur de rendu XML (P1 — LayoutLib, dépôt
-# jjoblab, JitPack v2.1.1 ; les modules frères transitent par les
-# dépendances inter-modules réécrites par JitPack).
+# personnel jjoblab, composite source P2 révisée ; les modules frères
+# transitent par les api(project(...)) du build inclus).
 layoutlib-inflater = { group = "com.github.jjoblab.LayoutLib", name = "module-inflater", version.ref = "layoutlib" }
 
 # Tests unitaires JVM.

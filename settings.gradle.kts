@@ -7,7 +7,6 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
-        // TEMPORAIRE-PE1 (non commité) : artefacts LayoutLib v2.1.2 locaux
         gradlePluginPortal()
     }
 }
@@ -50,6 +49,43 @@ dependencyResolutionManagement {
 
 // Convention plugins de build-logic (build inclus).
 includeBuild("build-logic")
+
+// LayoutLib (github.com/jjoblab/LayoutLib — projet personnel du
+// propriétaire) : moteur de rendu des previews XML, consommé en SOURCE
+// par build composite — décision propriétaire 2026-10-13 : le dépôt reste
+// GitHub-only, AUCUNE publication JitPack (docs/PREVIEW.md §P2 révisée).
+// Le dossier est résolu dans cet ordre : propriété Gradle `layoutLib.dir`,
+// variable d'environnement CODEIDE_LAYOUTLIB_DIR, puis défaut
+// `../LayoutLib` (checkout frère — convention de la CI et de la sandbox).
+// La SUBSTITUTION remplace les coordonnées com.github.jjoblab.LayoutLib:*
+// par les projets du build inclus : chaque dépôt garde son catalogue et
+// ses conventions, :preview:xml garde une dépendance « externe » (aucune
+// règle de pureté inter-modules impliquée) ; l'épinglage de VERSION se
+// fait par le ref git check out (tag v2.2.0 = version du catalogue — la
+// substitution ignore la version déclarée).
+val dossierLayoutLib: File =
+    providers.gradleProperty("layoutLib.dir")
+        .orElse(providers.environmentVariable("CODEIDE_LAYOUTLIB_DIR"))
+        .map(rootDir::resolve)
+        .orElse(rootDir.resolve("../LayoutLib"))
+        .get()
+if (!dossierLayoutLib.resolve("settings.gradle.kts").isFile) {
+    throw GradleException(
+        "LayoutLib introuvable : $dossierLayoutLib\n" +
+            "Cloner le dépôt frère (git clone https://github.com/jjoblab/LayoutLib.git ../LayoutLib) " +
+            "ou pointer la propriété Gradle layoutLib.dir — docs/PREVIEW.md §P2.",
+    )
+}
+includeBuild(dossierLayoutLib) {
+    dependencySubstitution {
+        substitute(module("com.github.jjoblab.LayoutLib:module-inflater")).using(project(":module-inflater"))
+        substitute(module("com.github.jjoblab.LayoutLib:module-resources")).using(project(":module-resources"))
+        substitute(module("com.github.jjoblab.LayoutLib:module-drawables")).using(project(":module-drawables"))
+        substitute(module("com.github.jjoblab.LayoutLib:module-themes")).using(project(":module-themes"))
+        substitute(module("com.github.jjoblab.LayoutLib:module-attributes")).using(project(":module-attributes"))
+        substitute(module("com.github.jjoblab.LayoutLib:module-layout")).using(project(":module-layout"))
+    }
+}
 
 rootProject.name = "CodeIDE"
 
@@ -142,9 +178,11 @@ include(":lsp:host")
 // ServiceLoader jo.lspkotlin.api.MoteurLangageKotlin seul visible).
 include(":lsp:kotlin")
 // :preview:xml (mission « Previews », PREVIEW.md étape PE1, P1–P5) :
-// moteur de preview XML sur LayoutLib v2.1.1 (jjoblab, JitPack) — rendu
-// bitmap off-screen sur fil dédié (in-process à PE1, processus :preview à
-// PE2), validation XmlPullParser, dernier rendu valide conservé pendant
-// les frappes. La vue (VuePreviewXml) et le moteur sont consommés par
-// feature:editor ; la dépendance LayoutLib reste confinée ici.
+// moteur de preview XML sur LayoutLib (jjoblab, build composite en source
+// — la substitution des coordonnées com.github.jjoblab.LayoutLib:* vit
+// plus haut dans ce fichier) — rendu bitmap off-screen sur fil dédié
+// (in-process à PE1, processus :preview à PE2), validation XmlPullParser,
+// dernier rendu valide conservé pendant les frappes. La vue (VuePreviewXml)
+// et le moteur sont consommés par feature:editor ; la dépendance LayoutLib
+// reste confinée ici.
 include(":preview:xml")
