@@ -177,7 +177,13 @@ class ModuleRulesPlugin : Plugin<Project> {
         // BRANCHE ses ressources (session LSP, flush I7) sur le contrat
         // de session de projet (Kotlin JVM pur, même famille core).
         chemin == ":feature:editor" ->
-            setOf(":core:ui", ":core:domain", ":core:model", ":lsp:host", ":core:session")
+            setOf(":core:ui", ":core:domain", ":core:model", ":lsp:host", ":core:session", ":preview:xml")
+        // Mission « Previews » (PREVIEW.md PE1, P1–P5) : le moteur de
+        // preview XML ne dépend que des contrats du domaine (dispatchers,
+        // journal) — la dépendance LayoutLib y est confinée. PE2 ajoutera
+        // le module du processus :preview (AIDL) au-dessus, feature:editor
+        // ne voyant jamais LayoutLib directement.
+        chemin == ":preview:xml" -> setOf(":core:domain")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")

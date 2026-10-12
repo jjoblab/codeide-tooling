@@ -7,6 +7,7 @@ pluginManagement {
     repositories {
         google()
         mavenCentral()
+        // TEMPORAIRE-PE1 (non commité) : artefacts LayoutLib v2.1.2 locaux
         gradlePluginPortal()
     }
 }
@@ -140,3 +141,10 @@ include(":lsp:host")
 // tout module interne (pack « langue » téléchargeable différé — D6 : SPI
 // ServiceLoader jo.lspkotlin.api.MoteurLangageKotlin seul visible).
 include(":lsp:kotlin")
+// :preview:xml (mission « Previews », PREVIEW.md étape PE1, P1–P5) :
+// moteur de preview XML sur LayoutLib v2.1.1 (jjoblab, JitPack) — rendu
+// bitmap off-screen sur fil dédié (in-process à PE1, processus :preview à
+// PE2), validation XmlPullParser, dernier rendu valide conservé pendant
+// les frappes. La vue (VuePreviewXml) et le moteur sont consommés par
+// feature:editor ; la dépendance LayoutLib reste confinée ici.
+include(":preview:xml")
