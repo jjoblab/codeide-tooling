@@ -81,7 +81,7 @@ class ModuleRulesPlugin : Plugin<Project> {
          * vendored Java, ADR 0108). */
         val MODULES_PURS =
             setOf(
-                ":core:model", ":core:domain",
+                ":core:model", ":core:domain", ":core:session",
                 ":tooling:protocol", ":tooling:api", ":tooling:server",
                 ":lsp:model", ":lsp:index", ":lsp:java", ":lsp:ecj-art",
                 ":lsp:testing",
@@ -97,6 +97,11 @@ class ModuleRulesPlugin : Plugin<Project> {
         chemin == ":app" -> null // assemblage final : tout est permis (sauf core:testing hors test)
         chemin == ":core:model" -> emptySet()
         chemin == ":core:domain" -> setOf(":core:model")
+        // Cycle de vie (prompt 3 §5.1, ADR 0114) : le contrat de session
+        // consomme AppResult/AppError + ProjectId (core:model) et les ports
+        // AppLogger/TimeProvider (core:domain) — même famille que
+        // core:database/core:bootstrap.
+        chemin == ":core:session" -> setOf(":core:model", ":core:domain")
         chemin in setOf(":core:database", ":core:datastore", ":core:storage", ":core:logging") ->
             setOf(":core:model", ":core:domain")
         // Terminal-1, section 2.3 : localisation des outils + environnement.
