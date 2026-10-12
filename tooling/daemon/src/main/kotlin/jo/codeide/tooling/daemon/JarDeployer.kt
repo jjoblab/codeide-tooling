@@ -4,11 +4,14 @@ import android.content.Context
 import jo.codeide.core.domain.DispatcherProvider
 import jo.codeide.tooling.protocol.GradleProtocol
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
 import java.security.MessageDigest
+import java.util.concurrent.atomic.AtomicLong
 
 /**
  * Source du JAR orchestrateur — couture des tests.
@@ -113,6 +116,22 @@ private const val CHEMIN_ASSET_JAR = "tooling/${GradleProtocol.SERVER_JAR_NAME}"
  * `FileNotFoundException` ENOENT sans contexte — journal de terrain
  * « <chemin>: The source file doesn't exist. », indéchiffrable).
  *
+ * **v0.100.1** (retour d'appareil, pile JarDeployer.kt:183) : le repli
+ * « copie après échec de renommage » restait HORS de la hiérarchie
+ * typée, et le `.tmp` portait un nom FIXE — deux déploiements CONCURRENTS
+ * (deux process de l'app pendant un redémarrage, deux tentative()
+ * qui se chevauchent) partageaient le même `.tmp` : le gagnant le
+ * renommait, le perdant voyait SA source disparaître et mourrait d'un
+ * `NoSuchFileException` BRUT (« The source file doesn. ») — classé
+ * DÉFINITIF par [DaemonManager] alors que le JAR ÉTAIT déployé. Trois
+ * durcissements : `.tmp` UNIQUE (compteur + nano — l'horloge monotone
+ * est COMMUNE aux process : deux process distincts ne produisent pas le
+ * même nom, et `android.os.Process.myPid()` serait inaccessible aux
+ * tests JVM purs du module — « not mocked »), exclusion mutuelle
+ * in-process ([Mutex]), repli TYÉ et TOLÉRANT (un `.tmp` disparu avec
+ * un JAR en place portant DÉJÀ notre empreinte = un concurrent a gagné
+ * la course : résultat atteint, pas un échec).
+ *
  * @property dossierCible répertoire de déploiement (`filesDir/tooling`).
  */
 internal class JarDeployer(
@@ -120,6 +139,9 @@ internal class JarDeployer(
     private val dossierCible: File,
     private val dispatchers: DispatcherProvider,
 ) {
+    /** Exclusion mutuelle in-process des déploiements (v0.100.1). */
+    private val exclusion = Mutex()
+
     /** Chemin du JAR déployé (exécutable par le binaire java). */
     val jar: File
         get() = File(dossierCible, GradleProtocol.SERVER_JAR_NAME)
@@ -131,67 +153,157 @@ internal class JarDeployer(
     /**
      * Déploie le JAR si la source a changé, retourne son chemin.
      *
+     * v0.100.1 : EXCLUSIF in-process ([exclusion]) — deux appels
+     * concurrents se sérialisent (le second voit le marqueur frais et
+     * ne recopie rien) ; la garde est REVERIFIÉE sous le verrou.
+     *
      * @return chemin du JAR exécutable, déjà en place.
      * @throws EchecDeploiementJar échec typé — [EchecDeploiementJar.SourceJarIndisible]
      *   (définitif) ou CibleInaccessible/EcritureImpossible (retentables) ;
      *   l'appelant ([DaemonManager]) décide selon le type.
      */
     suspend fun deployer(): File =
-        withContext(dispatchers.io) {
-            // v0.99.1 : la création du répertoire est VERIFIÉE — un
-            // échec silencieux produisait en cascade un ENOENT obscur
-            // sur le `.tmp` (le « The source file doesn't exist. » de
-            // terrain, sans chemin ni cause).
-            if (!dossierCible.isDirectory && !dossierCible.mkdirs()) {
-                throw EchecDeploiementJar.CibleInaccessible(dossierCible)
-            }
-            val empreinte =
-                try {
-                    empreinteSource()
-                } catch (lecture: IOException) {
-                    throw EchecDeploiementJar.SourceJarIndisible(lecture)
+        exclusion.withLock {
+            withContext(dispatchers.io) {
+                // v0.99.1 : la création du répertoire est VERIFIÉE — un
+                // échec silencieux produisait en cascade un ENOENT obscur
+                // sur le `.tmp` (le « The source file doesn't exist. » de
+                // terrain, sans chemin ni cause).
+                if (!dossierCible.isDirectory && !dossierCible.mkdirs()) {
+                    throw EchecDeploiementJar.CibleInaccessible(dossierCible)
                 }
-            if (jar.isFile && marqueur.isFile && marqueur.readText() == empreinte) {
-                return@withContext jar
-            }
-
-            val temporaire = File(dossierCible, "${GradleProtocol.SERVER_JAR_NAME}.tmp")
-            try {
-                source.flux().use { entree ->
-                    temporaire.outputStream().use { sortie ->
-                        entree.copyTo(sortie, TAILLE_TAMPON)
+                val empreinte =
+                    try {
+                        empreinteSource()
+                    } catch (lecture: IOException) {
+                        throw EchecDeploiementJar.SourceJarIndisible(lecture)
                     }
+                // v0.100.1 : un marqueur illisible (stockage transitoire) n'est
+                // PAS un échec — il force simplement le redéploiement.
+                if (jar.isFile && marqueurPorte(empreinte)) {
+                    return@withContext jar
                 }
-            } catch (transfert: IOException) {
-                // La source a pu s'ouvrir pour l'empreinte puis mourir en
-                // cours de copie : les deux côtés sont couverts — une
-                // écriture partiale du `.tmp` reste SANS effet (jamais
-                // renommée), le prochain déploiement la réécrit.
-                throw EchecDeploiementJar.EcritureImpossible(
-                    "copie du JAR impossible vers ${temporaire.absolutePath} : ${transfert.message}",
-                    transfert,
-                )
+                purgerTmpHerite()
+                val temporaire = nomTemporaireUnique()
+                copier(temporaire)
+                installer(temporaire, empreinte)
+                jar
             }
-            if (jar.isFile && !jar.delete()) {
-                throw EchecDeploiementJar.EcritureImpossible(
-                    "impossible de remplacer l'ancien JAR : ${jar.absolutePath}",
-                    null,
-                )
+        }
+
+    /**
+     * Purge du `.tmp` à NOM FIXE hérité (≤ v0.100.0) — le nouveau code
+     * n'écrit plus jamais ce nom, aucun process vivant ne le possède :
+     * purge sûre (7,6 Mo rendus au disque).
+     */
+    private fun purgerTmpHerite() {
+        File(dossierCible, "${GradleProtocol.SERVER_JAR_NAME}.tmp").delete()
+    }
+
+    /**
+     * `.tmp` UNIQUE par tentative (compteur + nano — l'horloge monotone
+     * est commune aux process, deux déploiements de process DISTINCTS ne
+     * partagent plus jamais la même source intermédiaire ;
+     * `android.os.Process.myPid()` n'est pas utilisé : inaccessible aux
+     * tests JVM purs du module — « not mocked »).
+     */
+    private fun nomTemporaireUnique(): File =
+        File(
+            dossierCible,
+            "${GradleProtocol.SERVER_JAR_NAME}.${COMPTEUR_DEPLOIEMENTS.incrementAndGet()}" +
+                ".${System.nanoTime()}.tmp",
+        )
+
+    /**
+     * Copie de la source vers le `.tmp` — TYÉ en échec d'écriture
+     * (retentable). La source a pu s'ouvrir pour l'empreinte puis mourir
+     * en cours de copie : les deux côtés sont couverts — une écriture
+     * partiale du `.tmp` reste SANS effet (jamais renommée), le prochain
+     * déploiement la réécrit.
+     */
+    private fun copier(temporaire: File) {
+        try {
+            source.flux().use { entree ->
+                temporaire.outputStream().use { sortie ->
+                    entree.copyTo(sortie, TAILLE_TAMPON)
+                }
             }
-            if (!temporaire.renameTo(jar)) {
-                // Filesystem sans renommage fiable (rare) : repli par copie.
+        } catch (transfert: IOException) {
+            temporaire.delete()
+            throw EchecDeploiementJar.EcritureImpossible(
+                "copie du JAR impossible vers ${temporaire.absolutePath} : ${transfert.message}",
+                transfert,
+            )
+        }
+    }
+
+    /**
+     * Installe le `.tmp` comme JAR (remplacement + renommage + marqueur).
+     *
+     * v0.100.1 (pile de terrain JarDeployer.kt:183) : le repli « copie
+     * après échec de renommage » est TYÉ et TOLÉRANT — un `.tmp` disparu
+     * avec un JAR en place portant DÉJÀ notre empreinte signale un
+     * déploiement CONCURRENT gagnant (autre process) : le résultat EST en
+     * place, ce n'est pas un échec.
+     *
+     * Exemption detekt ciblée (règle 16) : ThrowsCount — chaque `throw`
+     * distingue une cause DIFFÉRENTE (ancien JAR inamovible, recopie
+     * impossible après renommage perdu, marqueur incréable) avec son
+     * message typé propre.
+     */
+    @Suppress("ThrowsCount")
+    private fun installer(
+        temporaire: File,
+        empreinte: String,
+    ) {
+        if (jar.isFile && !jar.delete()) {
+            temporaire.delete()
+            throw EchecDeploiementJar.EcritureImpossible(
+                "impossible de remplacer l'ancien JAR : ${jar.absolutePath}",
+                null,
+            )
+        }
+        if (!temporaire.renameTo(jar)) {
+            if (jar.isFile && marqueurPorte(empreinte)) {
+                // Un déploiement CONCURRENT a gagné la course — le JAR
+                // en place EST celui de notre empreinte : résultat atteint.
+                return
+            }
+            // Filesystem sans renommage fiable (rare) : repli par copie.
+            try {
                 temporaire.copyTo(jar, overwrite = true)
                 temporaire.delete()
-            }
-            try {
-                marqueur.writeText(empreinte)
-            } catch (ecriture: IOException) {
+            } catch (recopie: IOException) {
                 throw EchecDeploiementJar.EcritureImpossible(
-                    "marqueur de version incréable : ${marqueur.absolutePath} (${ecriture.message})",
-                    ecriture,
+                    "recopie après échec de renommage impossible (${temporaire.absolutePath} vers " +
+                        "${jar.absolutePath}) : ${recopie.message}",
+                    recopie,
                 )
             }
-            jar
+        }
+        try {
+            marqueur.writeText(empreinte)
+        } catch (ecriture: IOException) {
+            throw EchecDeploiementJar.EcritureImpossible(
+                "marqueur de version incréable : ${marqueur.absolutePath} (${ecriture.message})",
+                ecriture,
+            )
+        }
+    }
+
+    /**
+     * Le marqueur porte-t-il DÉJÀ cette empreinte (illisible = non).
+     *
+     * SwallowedException ciblé (règle 16) : le contrat de la garde EST un
+     * booléen — un marqueur illisible force le REDÉPLOIEMENT (chemin de
+     * succès), l'exception n'est PAS une erreur à remonter.
+     */
+    @Suppress("SwallowedException")
+    private fun marqueurPorte(empreinte: String): Boolean =
+        try {
+            marqueur.isFile && marqueur.readText() == empreinte
+        } catch (lecture: IOException) {
+            false
         }
 
     /** Empreinte SHA-256 hexadécimale du JAR source (hex minuscule). */
@@ -214,6 +326,9 @@ internal class JarDeployer(
 
         /** Taille du tampon de copie/digest (64 Kio). */
         const val TAILLE_TAMPON = 64 * 1024
+
+        /** Compteur process-wide des déploiements (unicité du `.tmp`). */
+        val COMPTEUR_DEPLOIEMENTS = AtomicLong(0)
     }
 }
 
