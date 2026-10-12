@@ -60,6 +60,16 @@ material = "1.14.0"
 # Kotlin (bibliothèques).
 coroutines = "1.11.0"
 serialization = "1.9.0"
+# LSP Kotlin (K1, ADR 0115) : org.jetbrains:syntax-api — l'arbre de
+# construction syntaxique de la plateforme IntelliJ, contre lequel la
+# grammaire vendorée du compilateur Kotlin est écrite. Hors Central :
+# dépôt intellij-dependencies (accès par cache-redirector, voir
+# settings.gradle.kts). Version épinglée par le tag amont v2.3.0 dans son
+# propre libs.versions.toml — à monter ENSEMBLE du vendoring
+# (lsp/kotlin/src/main/vendor/VENDOR.md). jetbrains-annotations (Central)
+# est la seconde dépendance amont.
+jetbrains-syntax-api = "0.3.340"
+jetbrains-annotations = "26.0.2"
 
 # Tests.
 junit4 = "4.13.2"
@@ -184,6 +194,12 @@ asm-commons = { group = "org.ow2.asm", name = "asm-commons", version.ref = "asm"
 junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junit-jupiter" }
 junit-platform-launcher = { group = "org.junit.platform", name = "junit-platform-launcher", version.ref = "junit-platform" }
 android-builder-model = { group = "com.android.tools.build", name = "builder-model", version.ref = "builder-model" }
+
+# Mission « LSP Kotlin » — :lsp:kotlin (K1, ADR 0115) : ce contre quoi la
+# grammaire vendorée est écrite (api : nos types exposent SyntaxElementType)
+# + annotations de l'amont (implementation).
+jetbrains-syntax-api = { group = "org.jetbrains", name = "syntax-api", version.ref = "jetbrains-syntax-api" }
+jetbrains-annotations = { group = "org.jetbrains", name = "annotations", version.ref = "jetbrains-annotations" }
 
 # Tests unitaires JVM.
 junit4 = { group = "junit", name = "junit", version.ref = "junit4" }
