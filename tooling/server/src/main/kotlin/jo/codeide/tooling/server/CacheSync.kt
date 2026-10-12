@@ -39,6 +39,16 @@ internal class CacheSync {
     /** Dernière entrée déposée pour [projectDir], `null` si aucune. */
     fun consulter(projectDir: String): Entree? = entrees[projectDir]
 
+    /**
+     * Purge l'entrée du projet [projectDir] (mission « Cycle de vie »
+     * étape D, v9 : fermeture PAR PROJET) — idempotente, un projet sans
+     * entrée est un no-op. La clé est le chemin canonique, identique à
+     * celle des dépôts (l'app envoie `canonicalPath`).
+     */
+    fun purger(projectDir: String) {
+        entrees.remove(projectDir)
+    }
+
     /** Entrée du cache (types du protocole, prête à publier). */
     internal data class Entree(
         val taches: List<TaskInfo>,

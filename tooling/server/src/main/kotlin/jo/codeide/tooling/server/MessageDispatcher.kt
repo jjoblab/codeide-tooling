@@ -9,6 +9,8 @@ import jo.codeide.tooling.protocol.ClasspathRequest
 import jo.codeide.tooling.protocol.DependenciesRequest
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
+import jo.codeide.tooling.protocol.FermerProjetRequest
+import jo.codeide.tooling.protocol.FermerProjetResult
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.HeapRequest
 import jo.codeide.tooling.protocol.HelloRequest
@@ -29,6 +31,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.SerializationException
 import java.io.EOFException
+import java.io.File
 import java.io.IOException
 
 /**
@@ -94,7 +97,15 @@ internal class MessageDispatcher(
         }
     }
 
-    /** Aiguillage typé — exhaustif par construction (interface scellée). */
+    /**
+     * Aiguillage typé — exhaustif par construction (interface scellée).
+     *
+     * Exemption detekt ciblée (règle 16) : CyclomaticComplexMethod — une
+     * branche PAR type de requête du protocole, c'est le dessin même d'un
+     * routeur (même exemption que `EditorViewModel.onAction`) ; l'épuisement
+     * exhaustif du `when` est la GARDE contre l'oubli d'un message.
+     */
+    @Suppress("CyclomaticComplexMethod")
     private suspend fun traiter(requete: ToolingRequest) {
         try {
             when (requete) {
@@ -104,6 +115,13 @@ internal class MessageDispatcher(
 
                 is CancelRequest -> {
                     traiterAnnulation(requete)
+                }
+
+                // Mission « Cycle de vie » étape D (v9, E9) : fermeture
+                // PAR PROJET — libère la connexion Tooling API et purge le
+                // cache de sync du projet.
+                is FermerProjetRequest -> {
+                    traiterFermetureProjet(requete)
                 }
 
                 is BuildInput -> {
@@ -171,6 +189,25 @@ internal class MessageDispatcher(
                 "aucun build actif ne porte l'identifiant ${requete.buildId}",
             )
         }
+    }
+
+    /**
+     * Mission « Cycle de vie » étape D (v9) : fermeture de projet —
+     * connexion Tooling API libérée, cache de sync purgé, ACCUSÉ publié
+     * (l'existence de l'accusé est le succès ; idempotente par
+     * construction : un projet inconnu est un no-op).
+     */
+    private suspend fun traiterFermetureProjet(requete: FermerProjetRequest) {
+        pool.fermer(File(requete.projectDir))
+        cacheSync.purger(requete.projectDir)
+        Journal.info("fermeture de projet ${requete.projectDir} : connexion libérée, cache purgé")
+        bus.publier(
+            FermerProjetResult(
+                id = requete.id,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = requete.projectDir,
+            ),
+        )
     }
 
     /** v0.41.1 : écrit sur stdin du build en cours (readln, Scanner). */

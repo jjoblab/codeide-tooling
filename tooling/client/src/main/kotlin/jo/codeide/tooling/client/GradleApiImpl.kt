@@ -40,6 +40,8 @@ import jo.codeide.tooling.protocol.DependenciesResult
 import jo.codeide.tooling.protocol.Diagnostic
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
+import jo.codeide.tooling.protocol.FermerProjetRequest
+import jo.codeide.tooling.protocol.FermerProjetResult
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.HeapEvent
 import jo.codeide.tooling.protocol.HelloResponse
@@ -462,6 +464,44 @@ class GradleApiImpl
         }
 
         /**
+         * Mission « Cycle de vie » étape D (v9, E9) : demande à
+         * l'orchestrateur de libérer les ressources du projet [projectDir]
+         * (connexion Tooling API fermée, cache de sync purgé) — le démon
+         * applicatif continue de vivre. Appelé par le Fermable de session
+         * quand la session de projet se ferme (hors build/sync en vol).
+         *
+         * Idempotente côté orchestrateur ; l'absence de session socket est
+         * un échec typé (l'appelant journalise, jamais ne bloque).
+         */
+        override suspend fun fermerProjet(projectDir: File): AppResult<Unit> {
+            val reponse =
+                echanger(
+                    FermerProjetRequest(
+                        id = nouvelIdentifiant(),
+                        protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                        projectDir = projectDir.canonicalPath,
+                    ),
+                    delaiMs = DELAI_FERMETURE_PROJET_MS,
+                ) ?: return echecConnexion()
+            return when (reponse) {
+                // l'existence de l'accusé est le succès (protocole v9)
+                is FermerProjetResult -> {
+                    AppResult.Success(Unit)
+                }
+
+                is ErrorResponse -> {
+                    AppResult.Failure(reponse.versErreurDomaine())
+                }
+
+                else -> {
+                    AppResult.Failure(
+                        AppError.Tooling(ToolingReason.Internal, "réponse inattendue : ${reponse::class.simpleName}"),
+                    )
+                }
+            }
+        }
+
+        /**
          * Conclut une sync EN COURS à la perte de session (étape 32 ;
          * v0.48.0 : le TERMINAL traverse le flux ordonné) : plus aucun
          * résultat n'arrivera — le flux se conclut lui-même (échec de
@@ -753,6 +793,14 @@ class GradleApiImpl
                 // levée par l'appelant (UI P5), le routeur ne fait que
                 // compléter.
                 is jo.codeide.tooling.protocol.BuildVariantsResult -> {
+                    promesses.remove(evenement.id)?.complete(evenement)
+                }
+
+                // Mission « Cycle de vie » étape D (v9) : accusé de
+                // fermeture de projet — la promesse est levée par
+                // l'appelant (Fermable de session), le routeur ne fait
+                // que compléter.
+                is FermerProjetResult -> {
                     promesses.remove(evenement.id)?.complete(evenement)
                 }
 
@@ -1472,6 +1520,15 @@ class GradleApiImpl
 
             /** Délai client de lecture des scripts de build (P1, ADR 0095). */
             const val DELAI_SCRIPTS_BUILD_MS: Long = 15_000L
+
+            /**
+             * Délai client de la fermeture de projet (mission « Cycle de
+             * vie » étape D, v9) : la fermeture d'une connexion Tooling
+             * API peut prendre quelques secondes — bornée loin de
+             * bloquer la fermeture de session (le Fermable a SA propre
+             * borne, ADR 0114).
+             */
+            const val DELAI_FERMETURE_PROJET_MS: Long = 15_000L
 
             /** Étiquette des résumés de latence (mesure console, v0.43.0). */
             const val TAG_LATENCE = "ConsoleLatence"

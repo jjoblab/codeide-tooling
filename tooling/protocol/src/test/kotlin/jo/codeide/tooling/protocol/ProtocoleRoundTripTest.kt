@@ -45,10 +45,10 @@ class ProtocoleRoundTripTest {
             .content
 
     @Test
-    fun `le catalogue couvre 36 messages - 14 requetes et 22 evenements`() {
-        assertEquals(14, EchantillonsMessages.requetes.size)
-        assertEquals(22, EchantillonsMessages.evenements.size)
-        assertEquals(36, echantillons.size)
+    fun `le catalogue couvre 38 messages - 15 requetes et 23 evenements`() {
+        assertEquals(15, EchantillonsMessages.requetes.size)
+        assertEquals(23, EchantillonsMessages.evenements.size)
+        assertEquals(38, echantillons.size)
     }
 
     @Test

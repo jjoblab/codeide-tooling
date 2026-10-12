@@ -37,6 +37,8 @@ internal object EchantillonsMessages {
             ClasspathRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo", arguments = listOf("--offline")),
             ModelRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             CancelRequest(ID_REQUETE, VERSION, buildId = "build-7"),
+            // Cycle de vie étape D (v9) : fermeture de projet côté orchestrateur.
+            FermerProjetRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             BuildInput(ID_REQUETE, VERSION, buildId = "build-7", texte = "println(\"hello\")"),
             BuildScriptsRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             ResolvedDependenciesRequest(
@@ -312,6 +314,8 @@ internal object EchantillonsMessages {
                 source = "kotlinc",
             ),
             PongMessage(ID_EVENEMENT, VERSION),
+            // Cycle de vie étape D (v9) : accusé de fermeture de projet.
+            FermerProjetResult(ID_EVENEMENT, VERSION, projectDir = "/projets/demo"),
             ErrorResponse(
                 ID_EVENEMENT,
                 VERSION,
