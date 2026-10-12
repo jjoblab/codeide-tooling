@@ -165,8 +165,11 @@ class ModuleRulesPlugin : Plugin<Project> {
         // core:ui/domain/model — même esprit que feature:terminal →
         // core:terminal-runtime (le plein écran consomme le runtime des
         // sessions ; l'éditeur consomme l'hôte du langage).
+        // Cycle de vie étape C (ADR 0114) : + :core:session — l'éditeur
+        // BRANCHE ses ressources (session LSP, flush I7) sur le contrat
+        // de session de projet (Kotlin JVM pur, même famille core).
         chemin == ":feature:editor" ->
-            setOf(":core:ui", ":core:domain", ":core:model", ":lsp:host")
+            setOf(":core:ui", ":core:domain", ":core:model", ":lsp:host", ":core:session")
         chemin == ":core:crash" -> setOf(":core:model", ":core:domain", ":core:ui")
         chemin == ":core:data" ->
             setOf(":core:model", ":core:domain", ":core:database", ":core:datastore", ":core:storage", ":core:logging")
