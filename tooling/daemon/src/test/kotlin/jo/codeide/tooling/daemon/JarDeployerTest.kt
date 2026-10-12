@@ -1,5 +1,7 @@
 package jo.codeide.tooling.daemon
 
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -169,6 +171,63 @@ class JarDeployerTest {
             } finally {
                 cible.setWritable(true)
             }
+        }
+
+    @Test
+    fun `deux deploiements concurrents reussissent tous deux`() =
+        runBlocking {
+            // v0.100.1 (pile de terrain JarDeployer.kt:183, « The source
+            // file doesn't exist. ») : le `.tmp` à nom FIXE faisait mourir
+            // le perdant de la course — un NoSuchFileException BRUT, classé
+            // définitif alors que le JAR ÉTAIT déployé. Le `.tmp` est
+            // désormais UNIQUE et l'ouverture EXCLUSIVE : les deux appels
+            // concurrents réussissent, le second voit le marqueur frais.
+            val cible = dossierTemporaire("deploy-concurrent")
+            val octets = ByteArray(64_000) { indice -> (indice % 251).toByte() }
+            val deployeur = JarDeployer(SourceJarMemoire(octets), cible, DispatchersIoDirect())
+
+            coroutineScope {
+                repeat(8) {
+                    val a = async { deployeur.deployer() }
+                    val b = async { deployeur.deployer() }
+                    a.await()
+                    b.await()
+                }
+            }
+
+            val jar = File(cible, "gradle-server.jar")
+            assertTrue("le JAR devait exister", jar.isFile)
+            assertEquals(octets.size.toLong(), jar.length())
+            assertEquals(
+                "aucun `.tmp` ne devait survivre",
+                emptyList<String>(),
+                cible
+                    .listFiles()
+                    .orEmpty()
+                    .filter { it.name.endsWith(".tmp") }
+                    .map { it.name },
+            )
+            assertEquals(64, File(cible, "version.txt").readText().length)
+        }
+
+    @Test
+    fun `le tmp a nom fixe herite des versions precedentes est purge`() =
+        runBlocking {
+            // v0.100.0 et avant écrivaient `gradle-server.jar.tmp` à nom
+            // fixe : un déploiement interrompu y laissait jusqu'à 7,6 Mo.
+            // Le nouveau code n'écrit plus JAMAIS ce nom — la purge à
+            // l'entrée est sûre (aucun process vivant ne le possède).
+            val cible = dossierTemporaire("deploy-purge-herite")
+            val octets = ByteArray(1_024) { 1 }
+            val heritage = File(cible, "gradle-server.jar.tmp")
+            cible.mkdirs()
+            heritage.writeText("deploiement interrompu d'une version anterieure")
+
+            val jar = JarDeployer(SourceJarMemoire(octets), cible, DispatchersIoDirect()).deployer()
+
+            assertTrue("le JAR devait exister", jar.isFile)
+            assertFalse("le `.tmp` hérité devait être purgé", heritage.isFile)
+            assertEquals(octets.size.toLong(), jar.length())
         }
 
     private companion object {
