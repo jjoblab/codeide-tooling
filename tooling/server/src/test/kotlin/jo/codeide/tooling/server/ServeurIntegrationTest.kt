@@ -14,6 +14,8 @@ import jo.codeide.tooling.protocol.Diagnostic
 import jo.codeide.tooling.protocol.DiagnosticSeverity
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
+import jo.codeide.tooling.protocol.FermerProjetRequest
+import jo.codeide.tooling.protocol.FermerProjetResult
 import jo.codeide.tooling.protocol.FrameCodec
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.HeapEvent
@@ -68,7 +70,13 @@ import kotlin.reflect.KClass
  * temporaire, jamais construite en place). Le premier test qui touche une
  * fixture amorce le daemon Gradle (~15 s une seule fois), les suivants le
  * réutilisent.
+ *
+ * Exemption detekt ciblée (règle 16) : LargeClass — LA suite d'intégration
+ * du module (un test PAR contrat du protocole, infrastructure AppFactice
+ * partagée) ; l'éclater dupliquerait le socle socket/fixture (mission
+ * « Cycle de vie » étape D : +1 test fermeture de projet).
  */
+@Suppress("LargeClass")
 class ServeurIntegrationTest {
     private val temporaires = mutableListOf<Path>()
     private var app: AppFactice? = null
@@ -737,6 +745,73 @@ class ServeurIntegrationTest {
         assertTrue("le tas maximum devait être positif : ${tas.maxMb}", tas.maxMb > 0)
     }
 
+    // ------------------------------------------------------------------
+    // Cycle de vie étape D (v9) : fermeture de projet côté orchestrateur.
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `la fermeture de projet accuse, purge et laisse la session vivante`() {
+        val app = demarrer()
+        val projet = fixture("minimal-java")
+        // Pré-condition : une sync RÉUSSIE ouvre une connexion Tooling API
+        // et dépose le cache du projet (§3.1).
+        app.envoyer(
+            SyncRequest(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val resultatSync = app.attendre(DELAI_BUILD, SyncResult::class)
+        assertTrue("pré-condition : sync réussie", resultatSync.succeeded)
+
+        val identifiant = nouvelId()
+        app.envoyer(
+            FermerProjetRequest(
+                id = identifiant,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val accuse = app.attendre(10_000, FermerProjetResult::class)
+        assertEquals("l'accusé échoit la requête (corrélation §3.2)", identifiant, accuse.id)
+        assertEquals(projet.toString(), accuse.projectDir)
+
+        // Idempotente : fermer un projet INCONNU est un no-op accusé (le
+        // contrat v9 — l'appelant ne suppose rien de l'état interne).
+        val identifiantInconnu = nouvelId()
+        app.envoyer(
+            FermerProjetRequest(
+                id = identifiantInconnu,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = "/projets/jamais-ouvert",
+            ),
+        )
+        // attendre balaye le journal ENTIER (sans consommer) : on attend
+        // le SECOND accusé — l'ordre du câble est l'ordre d'émission.
+        val second = app.attendreNieme(10_000, FermerProjetResult::class, 1)
+        assertEquals(identifiantInconnu, second.id)
+        assertEquals("/projets/jamais-ouvert", second.projectDir)
+
+        // La session SURVIT (le démon vit — politique S6) : un ping passe.
+        app.envoyer(
+            PingMessage(id = nouvelId(), protocolVersion = GradleProtocol.PROTOCOL_VERSION),
+        )
+        assertNotNull(app.attendre(10_000, PongMessage::class))
+
+        // Le monde n'est pas cassé : le pool ROUVRE une connexion à la
+        // demande — une nouvelle sync du même projet réussit.
+        app.envoyer(
+            SyncRequest(
+                id = nouvelId(),
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = projet.toString(),
+            ),
+        )
+        val resync = app.attendre(DELAI_BUILD, SyncResult::class)
+        assertTrue("la re-sync après fermeture devait réussir : ${resync.failureMessage}", resync.succeeded)
+    }
+
     @Test
     fun `une requete inconnue renvoie une erreur typée sans couper la session`() {
         val app = demarrer()
@@ -891,6 +966,25 @@ private class AppFactice(
             "aucun ${type.simpleName} en $delaiMs ms — reçu : " +
                 synchronized(verrou) { journal.joinToString(limit = 25) { it::class.simpleName ?: "?" } },
         )
+    }
+
+    /**
+     * Attend le N-ième (0-based) événement du type demandé — [attendre]
+     * balaye le journal SANS consommer : pour deux accusés du même type,
+     * il faut regarder l'ACCUMULATION (mission « Cycle de vie » étape D).
+     */
+    fun <T : ToolingEvent> attendreNieme(
+        delaiMs: Long,
+        type: KClass<T>,
+        index: Int,
+    ): T {
+        val debut = System.currentTimeMillis()
+        while (System.currentTimeMillis() - debut < delaiMs) {
+            val vus = synchronized(verrou) { journal.filterIsInstance(type.java) }
+            if (vus.size > index) return vus[index]
+            Thread.sleep(20)
+        }
+        throw AssertionError("aucun ${type.simpleName} n°${index + 1} en $delaiMs ms")
     }
 
     /** Lignes de sortie de build contenant [texte]. */

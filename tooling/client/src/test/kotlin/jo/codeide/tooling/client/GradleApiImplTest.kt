@@ -26,6 +26,8 @@ import jo.codeide.tooling.protocol.ClasspathResult
 import jo.codeide.tooling.protocol.DetailTelechargement
 import jo.codeide.tooling.protocol.ErrorCode
 import jo.codeide.tooling.protocol.ErrorResponse
+import jo.codeide.tooling.protocol.FermerProjetRequest
+import jo.codeide.tooling.protocol.FermerProjetResult
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.HeapEvent
 import jo.codeide.tooling.protocol.PartialSyncResult
@@ -61,7 +63,13 @@ import java.util.UUID
  * corrélation requête/réponse, états, diffusion **non conflatante** sous
  * forte charge (le test de la section 7.3 : beaucoup de lignes, rapidement,
  * aucune perdue).
+ *
+ * Exemption detekt ciblée (règle 16) : LargeClass — LA suite du client
+ * (un test PAR contrat du port, SessionFactice partagée) ; l'éclater
+ * dupliquerait le socle (mission « Cycle de vie » étape D : +2 tests
+ * fermeture de projet).
  */
+@Suppress("LargeClass")
 class GradleApiImplTest {
     /** API de test courante — fermée après CHAQUE test : les pompes des
      * sessions ne fuient pas d'un test à l'autre (sur une machine à 2
@@ -747,5 +755,55 @@ class GradleApiImplTest {
                 }
             assertEquals(listOf("en cours…"), lignes.map { it.ligne })
             assertEquals(EtatConnexion.DECONNECTEE, api.observeConnectionState().first())
+        }
+
+    @Test
+    fun `la fermeture de projet envoie la requete v9 et accueille l accuse`() =
+        runBlocking {
+            // Mission « Cycle de vie » étape D (v9, E9) : le client demande
+            // la libération PAR PROJET, l'accusé lève la promesse.
+            var dossierRecu: String? = null
+            val session =
+                SessionFactice { requete, soi ->
+                    if (requete is FermerProjetRequest) {
+                        dossierRecu = requete.projectDir
+                        soi.emettre(
+                            FermerProjetResult(
+                                id = requete.id,
+                                protocolVersion = protocole,
+                                projectDir = requete.projectDir,
+                            ),
+                        )
+                    }
+                }
+            val api = nouvelleApi()
+            api.ouvrirSession(session)
+
+            val resultat = api.fermerProjet(File("/projets/demo"))
+
+            assertTrue("la fermeture devait réussir : $resultat", resultat is AppResult.Success)
+            assertEquals("le chemin voyagé en CANONIQUE", File("/projets/demo").canonicalPath, dossierRecu)
+            assertEquals(
+                "une SEULE requête fermer-projet",
+                1,
+                session.messages.count { it is FermerProjetRequest },
+            )
+        }
+
+    @Test
+    fun `la fermeture de projet sans orchestrateur echoue proprement`() =
+        runBlocking {
+            // Pas d'ouvrirSession : aucun orchestrateur — échec typé, la
+            // fermeture de session n'est jamais bloquée (le Fermable
+            // journalise et poursuit).
+            val api = nouvelleApi()
+
+            val resultat = api.fermerProjet(File("/projets/demo"))
+
+            assertTrue(resultat is AppResult.Failure)
+            assertTrue(
+                "l'échec devait être la perte de connexion : $resultat",
+                (resultat as AppResult.Failure).error.toString().contains("orchestrateur"),
+            )
         }
 }

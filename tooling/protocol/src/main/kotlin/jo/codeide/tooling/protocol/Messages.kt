@@ -283,6 +283,39 @@ public data class CancelRequest(
 ) : ToolingRequest
 
 /**
+ * Ferme le projet [projectDir] côté orchestrateur (mission « Cycle de
+ * vie » étape D, v9, E9 : la fermeture de session gagne ENFIN sa voie
+ * UI). Libère la connexion Tooling API du projet et purge le cache de
+ * sync — le démon applicatif CONTINUE de vivre (sa politique de durée
+ * de vie est reportée aux mesures §4.5/S6) et le démon Gradle
+ * sous-jacent reste géré par Gradle lui-même.
+ *
+ * Idempotente : fermer un projet inconnu (connexion absente, cache
+ * vide) est un no-op accusé — l'appelant ne fait pas de supposition
+ * sur l'état de l'orchestrateur.
+ */
+@Serializable
+@SerialName("fermer_projet_request")
+public data class FermerProjetRequest(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+) : ToolingRequest
+
+/**
+ * Accusé de [FermerProjetRequest] : l'existence de l'accusé (corrélé
+ * par [id]) EST le succès — la libération ne porte aucun résultat
+ * exploitable côté app au-delà du journal.
+ */
+@Serializable
+@SerialName("fermer_projet_result")
+public data class FermerProjetResult(
+    override val id: String,
+    override val protocolVersion: Int,
+    public val projectDir: String,
+) : ToolingEvent
+
+/**
  * Écrit sur l'entrée standard (stdin) du build en cours (v0.41.1) —
  * permet au programme exécuté par `gradle run` de lire `readln()`,
  * `Scanner(System.in)`, etc. Le client envoie ce message quand

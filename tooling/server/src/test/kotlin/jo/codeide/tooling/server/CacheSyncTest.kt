@@ -122,4 +122,34 @@ class CacheSyncTest {
         assertEquals(listOf("t2", "t3"), cache.consulter("/a")!!.taches.map { it.path })
         assertTrue(cache.consulter("/b")!!.taches.isEmpty())
     }
+
+    @Test
+    fun `la purge d un projet retire son entree et laisse les autres intactes`() {
+        // Mission « Cycle de vie » étape D (v9) : fermeture PAR projet.
+        val cache = CacheSync()
+        cache.deposer("/a", taches = listOf(TacheDto("t1", null, "t1")), modules = emptyList())
+        cache.deposer("/b", taches = listOf(TacheDto("t2", null, "t2")), modules = emptyList())
+
+        cache.purger("/a")
+
+        assertNull("l'entrée du projet fermé est retirée", cache.consulter("/a"))
+        assertEquals(
+            "les AUTRES projets restent isolés et intacts",
+            listOf("t2"),
+            cache.consulter("/b")!!.taches.map { it.path },
+        )
+    }
+
+    @Test
+    fun `la purge est idempotente - un projet inconnu est un no-op`() {
+        val cache = CacheSync()
+        cache.deposer("/b", taches = listOf(TacheDto("t2", null, "t2")), modules = emptyList())
+
+        cache.purger("/inconnu")
+        cache.purger("/inconnu")
+        cache.purger("/b")
+        cache.purger("/b")
+
+        assertNull(cache.consulter("/b"))
+    }
 }

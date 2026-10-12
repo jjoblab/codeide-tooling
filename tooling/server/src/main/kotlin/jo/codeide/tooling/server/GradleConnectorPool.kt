@@ -50,4 +50,26 @@ internal class GradleConnectorPool : AutoCloseable {
                 .onFailure { Journal.warn("fermeture de connexion Tooling API échouée : ${it.message}") }
         }
     }
+
+    /**
+     * Ferme la connexion du projet [dossier] UNIQUEMENT (mission « Cycle
+     * de vie » étape D, v9 : fermeture PAR PROJET, E9) — la clé est
+     * normalisée comme [connexion] (canonique) pour correspondre à ce
+     * que l'app envoie (`canonicalPath`).
+     *
+     * Idempotente : un projet sans connexion ouverte est un no-op (la
+     * requête est accusée quand même). Fermer une [ProjectConnection]
+     * ne tue PAS le démon Gradle sous-jacent (géré par Gradle —
+     * politique de durée de vie explicitement reportée aux mesures
+     * §4.5/S6, docs/CYCLE_DE_VIE.md §2.2).
+     */
+    suspend fun fermer(dossier: File) {
+        val cle = dossier.canonicalFile.absolutePath
+        val connexion = connexions.remove(cle) ?: return
+        withContext(Dispatchers.IO) {
+            runCatching { connexion.close() }
+                .onSuccess { Journal.info("connexion Tooling API fermée pour $cle (fermeture de projet)") }
+                .onFailure { Journal.warn("fermeture de connexion Tooling API échouée pour $cle : ${it.message}") }
+        }
+    }
 }

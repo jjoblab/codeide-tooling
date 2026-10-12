@@ -63,8 +63,19 @@ public object GradleProtocol {
      * sont désormais remplis. Champs optionnels → un client v7 n'est pas
      * cassé par le décodage, mais le handshake exige l'égalité exacte : les
      * deux bouts vivant dans le même APK, la sémantique change ensemble.
+     *
+     * v9 (mission « Cycle de vie » étape D, E9) :
+     * [FermerProjetRequest]/[FermerProjetResult] — la fermeture de session
+     * de projet gagne sa voie UI : l'app demande à l'orchestrateur de
+     * libérer la connexion Tooling API du projet et de purger le cache de
+     * sync quand la session se ferme (hors build/sync en vol — §2.1c).
+     * Le démon applicatif continue de vivre (politique de durée de vie
+     * reportée aux mesures §4.5/S6). Idempotente par construction
+     * (fermeture d'un projet inconnu = no-op accusé). Un NOUVEAU TYPE de
+     * requête/événement : indécodable par un pair v8 — le handshake exige
+     * l'égalité exacte, les deux bouts vivant dans le même APK.
      */
-    public const val PROTOCOL_VERSION: Int = 8
+    public const val PROTOCOL_VERSION: Int = 9
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"
