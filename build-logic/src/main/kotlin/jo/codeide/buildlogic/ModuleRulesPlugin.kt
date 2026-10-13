@@ -79,13 +79,15 @@ class ModuleRulesPlugin : Plugin<Project> {
          * LSP Java, prompt 2 §7 — lsp:model, lsp:index et lsp:testing en
          * Kotlin/Java JVM purs, lsp:java et lsp:ecj-art modules JVM
          * vendored Java, ADR 0108 ; LSP Kotlin, LSP_KOTLIN.md K1 — lsp:kotlin
-         * en Kotlin JVM pur, grammaire du compilateur vendorée, ADR 0115). */
+         * en Kotlin JVM pur, grammaire du compilateur vendorée, ADR 0115 ;
+         * LSP XML, LSP_XML.md XE1 — lsp:xml en Kotlin JVM pur, moteur
+         * maison zéro dépendance, décision X1). */
         val MODULES_PURS =
             setOf(
                 ":core:model", ":core:domain", ":core:session",
                 ":tooling:protocol", ":tooling:api", ":tooling:server",
                 ":lsp:model", ":lsp:index", ":lsp:java", ":lsp:ecj-art",
-                ":lsp:testing", ":lsp:kotlin",
+                ":lsp:testing", ":lsp:kotlin", ":lsp:xml",
             )
 
         /** Plugins Android interdits aux modules purs. */
@@ -168,8 +170,13 @@ class ModuleRulesPlugin : Plugin<Project> {
         // session Kotlin vit dans l'hôte, le moteur ne voit que le SPI
         // MoteurLangageKotlin (D6 : api, jamais l'implémentation — le pack
         // « langue » futur reste découplable).
+        // XE1 (LSP_XML.md §5) : + :lsp:xml — même frontière, la façade
+        // SessionLspXml et l'adaptateur LSP4J XmlLanguageServer vivent
+        // dans l'hôte, le moteur ne voit que le SPI MoteurLangageXml
+        // (X2 : api, jamais l'implémentation — le pack « langue » XML
+        // futur reste découplable, miroir :lsp:kotlin).
         chemin == ":lsp:host" ->
-            setOf(":lsp:java", ":lsp:index", ":lsp:model", ":lsp:kotlin")
+            setOf(":lsp:java", ":lsp:index", ":lsp:model", ":lsp:kotlin", ":lsp:xml")
         // Étape 4 lot h2 (§16.2) : l'ÉDITEUR consomme l'hôte LSP
         // (SessionLsp + définition cel-lsp — la surface publique de
         // :lsp:host, ADR 0109) pour brancher l'EditorView sur le serveur
