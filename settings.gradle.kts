@@ -177,6 +177,15 @@ include(":lsp:host")
 // tout module interne (pack « langue » téléchargeable différé — D6 : SPI
 // ServiceLoader jo.lspkotlin.api.MoteurLangageKotlin seul visible).
 include(":lsp:kotlin")
+// :lsp:xml (mission « LSP XML », LSP_XML.md XE1, décision X1) : moteur
+// d'analyse XML Android in-process — parseur TOLÉRANT écrit main (pile
+// de noms ouverts, reprise sur buffer à moitié tapé), DOM neutre,
+// règles de structure pures + coutures conservatrices (X4), zéro
+// dépendance (pas de Lemminx, pas de XSD — la sémantique Android vit
+// dans les données de plateforme et l'index ressources, pas dans un
+// schéma). Indépendant de tout module interne (SPI ServiceLoader
+// jo.lspxml.api.MoteurLangageXml seul visible, miroir :lsp:kotlin).
+include(":lsp:xml")
 // :preview:xml (mission « Previews », PREVIEW.md étape PE1, P1–P5) :
 // moteur de preview XML sur LayoutLib (jjoblab, build composite en source
 // — la substitution des coordonnées com.github.jjoblab.LayoutLib:* vit
