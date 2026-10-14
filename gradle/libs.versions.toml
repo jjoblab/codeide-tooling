@@ -123,7 +123,7 @@ javax-inject = "1"
 # qualifiers de langue values-fr/values-en, solver Cassowary câblé à
 # ConstraintLayout) ; la substitution ignore la version déclarée — la mise
 # à jour = bump ici + ref du clonage CI.
-layoutlib = "3.0.0"
+layoutlib = "3.3.0"
 
 # Interface ViewBinding pour core:ui (même version que l'AGP, vérifié sur Google Maven ;
 # AGP l'ajoute automatiquement aux modules qui activent viewBinding, core:ui la déclare explicitement).
