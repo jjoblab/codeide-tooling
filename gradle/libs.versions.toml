@@ -118,10 +118,12 @@ javax-inject = "1"
 # (AUCUNE publication JitPack, décision propriétaire). Intégration en SOURCE
 # par build composite : les coordonnées com.github.jjoblab.LayoutLib:* sont
 # SUBSTITUÉES par les projets du checkout frère (settings.gradle.kts). La
-# version = PIN INFORMATIF du ref git attendu (tag v2.2.0, aligné toolchain
-# CodeIDE) ; la substitution ignore la version déclarée — la mise à jour =
-# bump ici + ref du clonage CI.
-layoutlib = "2.2.0"
+# version = PIN INFORMATIF du ref git attendu (tag v3.0.0, ADR 0116 P0/P1/P2
+# livrés : drawables composites <layer-list>/<ripple>/<inset>/<bitmap>,
+# qualifiers de langue values-fr/values-en, solver Cassowary câblé à
+# ConstraintLayout) ; la substitution ignore la version déclarée — la mise
+# à jour = bump ici + ref du clonage CI.
+layoutlib = "3.0.0"
 
 # Interface ViewBinding pour core:ui (même version que l'AGP, vérifié sur Google Maven ;
 # AGP l'ajoute automatiquement aux modules qui activent viewBinding, core:ui la déclare explicitement).
