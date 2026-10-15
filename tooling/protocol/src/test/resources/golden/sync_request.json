@@ -1,1 +1,1 @@
-{"type":"sync_request","id":"req-42","protocolVersion":9,"projectDir":"/projets/demo","gradleVersion":"9.7.1","arguments":["--offline"]}
+{"type":"sync_request","id":"req-42","protocolVersion":10,"projectDir":"/projets/demo","gradleVersion":"9.7.1","arguments":["--offline"]}

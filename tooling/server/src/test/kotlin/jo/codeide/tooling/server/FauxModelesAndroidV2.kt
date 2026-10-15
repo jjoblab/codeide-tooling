@@ -105,13 +105,12 @@ internal class FauxSourceProvider(
 
 internal class FauxAndroidProject(
     override val variants: Collection<Variant> = listOf(FauxVariant("debug")),
+    override val javaCompileOptions: com.android.builder.model.v2.ide.JavaCompileOptions = FauxJavaCompileOptions(),
 ) : AndroidProject {
     override val namespace: String get() = "com.exemple"
     override val androidTestNamespace: String? get() = null
     override val testFixturesNamespace: String? get() = null
     override val testSuites: Collection<com.android.builder.model.v2.ide.TestSuite> get() = emptyList()
-    override val javaCompileOptions: com.android.builder.model.v2.ide.JavaCompileOptions
-        get() = error("non lu par le convertisseur")
 
     override val resourcePrefix: String? get() = null
     override val dynamicFeatures: Collection<String> get() = emptyList()
@@ -122,6 +121,18 @@ internal class FauxAndroidProject(
     override val lintChecksJars: List<File> get() = emptyList()
     override val desugarLibConfig: List<File> get() = emptyList()
     override val lintJar: File? get() = null
+}
+
+/**
+ * Options de compilation Java du modèle v2 (S1-a) — les niveaux du
+ * module Android, tels qu'AGP les livre (chaîne « 17 », « 1.8 »…).
+ */
+internal class FauxJavaCompileOptions(
+    override val sourceCompatibility: String = "17",
+    override val targetCompatibility: String = "17",
+    override val encoding: String = "UTF-8",
+) : com.android.builder.model.v2.ide.JavaCompileOptions {
+    override val isCoreLibraryDesugaringEnabled: Boolean get() = false
 }
 
 @Suppress("DEPRECATION")
