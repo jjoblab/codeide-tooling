@@ -61,7 +61,7 @@ includeBuild("build-logic")
 // par les projets du build inclus : chaque dépôt garde son catalogue et
 // ses conventions, :preview:xml garde une dépendance « externe » (aucune
 // règle de pureté inter-modules impliquée) ; l'épinglage de VERSION se
-// fait par le ref git check out (tag v3.4.5 = version du catalogue — la
+// fait par le ref git check out (tag v3.4.6 = version du catalogue — la
 // substitution ignore la version déclarée).
 val dossierLayoutLib: File =
     providers.gradleProperty("layoutLib.dir")
