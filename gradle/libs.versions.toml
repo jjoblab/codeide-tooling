@@ -41,19 +41,22 @@ androidx-recyclerview = "1.4.0"
 androidx-swiperefreshlayout = "1.2.0"  # vérifiée sur Google Maven (dernière stable)
 androidx-viewpager2 = "1.1.0"
 # Bibliothèque d'édition (prompt compagnon, section 2.2) — tag stable vérifié
-# sur github.com/jjoblab/code-editor le 2026-10-14 ; artefacts JitPack vérifiés
-# (cel-ui 3.69.0 : pom + module + sources, résolution OK ; 3.69.0 = lot B15 —
-# API GutterAction généralisée + suppression d'EditorBarTools, première
-# rupture assumée de la plage 3.51.1 → 3.69.0 — CodeIDE n'est pas concerné
-# par EditorBarTools : aucune référence dans le code). Montée 3.49.2 → 3.69.0
-# (v0.122.2) : compat API vérifiée par le guide MISE-A-JOUR-CODEIDE.md (docs/
-# du dépôt code-editor, 3.69.0) — plage 3.51.1 → 3.69.0 additive (nouvelles
-# méthodes EditorView en AJOUTS purs : barre de fil d'Ariane, search bar,
-# fast-scroller, bande d'erreurs, zoom mémoire par type, plis par niveau,
-# drag-déposer de bloc, gutter actions) SANS retrait de surface publique
-# hormis EditorBarTools (classe orpheline jamais consommée par CodeIDE).
+# sur github.com/jjoblab/code-editor le 2026-10-15 ; artefacts JitPack vérifiés
+# (cel-ui 3.70.1 : pom + module + sources, résolution OK ; 3.70.1 = correctif
+# complétion XML — la porte de contexte cel-ui respecte la famille XML ;
+# AUCUN changement d'API : 3.69.0 → 3.70.1 est purement comportemental dans
+# EditorCompletionPopup.isInCodeContext + 4 tests Robolectric ; 3.70.1 =
+# réédition de 3.70.0, la construction JitPack du tag initial ayant échoué sur
+# un rate-limit transitoire de Maven Central). Montée
+# 3.49.2 → 3.69.0 (v0.122.2) : compat API vérifiée par le guide
+# MISE-A-JOUR-CODEIDE.md (docs/ du dépôt code-editor, 3.69.0) — plage
+# 3.51.1 → 3.69.0 additive (nouvelles méthodes EditorView en AJOUTS purs :
+# barre de fil d'Ariane, search bar, fast-scroller, bande d'erreurs, zoom
+# mémoire par type, plis par niveau, drag-déposer de bloc, gutter actions)
+# SANS retrait de surface publique hormis EditorBarTools (classe orpheline
+# jamais consommée par CodeIDE).
 # CodeEditor côté CodeIDE ne change pas (les deux modules suivent version.ref).
-code-editor = "3.69.0"
+code-editor = "3.70.1"
 # Termux terminal-emulator (Apache-2.0) : sessions shell via pty — v0.118.3
 # vérifiée sur JitPack le 2026-09-23 (com.github.termux.termux-app).
 termux = "v0.118.3"
@@ -123,7 +126,7 @@ javax-inject = "1"
 # qualifiers de langue values-fr/values-en, solver Cassowary câblé à
 # ConstraintLayout) ; la substitution ignore la version déclarée — la mise
 # à jour = bump ici + ref du clonage CI.
-layoutlib = "3.3.0"
+layoutlib = "3.4.7"
 
 # Interface ViewBinding pour core:ui (même version que l'AGP, vérifié sur Google Maven ;
 # AGP l'ajoute automatiquement aux modules qui activent viewBinding, core:ui la déclare explicitement).
