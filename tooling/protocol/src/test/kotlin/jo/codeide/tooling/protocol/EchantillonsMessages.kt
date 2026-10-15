@@ -299,6 +299,11 @@ internal object EchantillonsMessages {
                             ignore = false,
                             raisonIgnore = null,
                             avertissements = emptyList(),
+                            // v10 (S1-a) : niveau Java du projet transporté
+                            // par le classpath — « 17 » pour ce module
+                            // d'exemple (Android).
+                            sourceCompatibility = "17",
+                            targetCompatibility = "17",
                         ),
                     ),
             ),

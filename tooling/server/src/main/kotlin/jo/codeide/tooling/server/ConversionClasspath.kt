@@ -41,6 +41,9 @@ internal fun ModuleClasspathDto.versClasspathModule(): ClasspathModule =
         ignore = ignore,
         raisonIgnore = raisonIgnore,
         avertissements = avertissements,
+        // v10 (S1-a) : niveaux Java du projet (null = indécidable).
+        sourceCompatibility = sourceCompatibility,
+        targetCompatibility = targetCompatibility,
     )
 
 /** Traduit une nature d'entrée DTO vers le protocole. */

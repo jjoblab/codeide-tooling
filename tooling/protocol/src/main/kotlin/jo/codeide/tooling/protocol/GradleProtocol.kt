@@ -74,8 +74,20 @@ public object GradleProtocol {
      * (fermeture d'un projet inconnu = no-op accusé). Un NOUVEAU TYPE de
      * requête/événement : indécodable par un pair v8 — le handshake exige
      * l'égalité exacte, les deux bouts vivant dans le même APK.
+     *
+     * v10 (plan de stabilisation LSP Java §3.1, lot S1-a « compliance par
+     * projet ») : [ClasspathModule] gagne [ClasspathModule.sourceCompatibility]
+     * et [ClasspathModule.targetCompatibility] — le niveau Java du projet
+     * (`sourceCompatibility`/`targetCompatibility` des scripts Gradle),
+     * lu du modèle v2 d'AGP (`JavaCompileOptions`) pour les modules
+     * Android et des `javaLanguageSettings` du modèle Idea pour les
+     * modules JVM purs. Champs OPTIONNELS (`null` = niveau par défaut
+     * « 17 », indécidable par le tooling) : un décodage v9 reste possible
+     * — mais le handshake exige toujours l'égalité exacte, les deux bouts
+     * vivant dans le même APK : la SÉMANTIQUE des diagnostics (var,
+     * records, switch) change avec les niveaux, elle voyage ensemble.
      */
-    public const val PROTOCOL_VERSION: Int = 9
+    public const val PROTOCOL_VERSION: Int = 10
 
     /** Nom du fichier de socket (UDS) — fichier, pas namespace abstrait. */
     public const val SOCKET_NAME: String = "gradle.sock"

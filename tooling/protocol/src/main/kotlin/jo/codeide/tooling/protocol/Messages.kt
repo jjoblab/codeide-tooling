@@ -867,6 +867,15 @@ public data class ClasspathEntry(
  * @property avertissements avertissements sur ce module (dépendance non
  *           résolue, AAR non extrait — v0.40.1 §4) — `null` si non
  *           calculé ; vide si aucun.
+ * @property sourceCompatibility niveau Java SOURCE du projet
+ *           (`sourceCompatibility` des scripts Gradle — v10, lot S1-a) :
+ *           lu du modèle v2 d'AGP (`JavaCompileOptions`) pour Android,
+ *           des `javaLanguageSettings` Idea pour un module JVM pur.
+ *           `null` = indécidable par le tooling (moteur LSP → défaut
+ *           « 17 »).
+ * @property targetCompatibility niveau Java de BYTECODE du projet
+ *           (`targetCompatibility` — v10, lot S1-a), mêmes sources et
+ *           même convention `null` que [sourceCompatibility].
  */
 @Serializable
 @SerialName("classpath_module")
@@ -885,6 +894,8 @@ public data class ClasspathModule(
     public val ignore: Boolean = false,
     public val raisonIgnore: String? = null,
     public val avertissements: List<String>? = null,
+    public val sourceCompatibility: String? = null,
+    public val targetCompatibility: String? = null,
 )
 
 /** Réponse de [ClasspathRequest] : classpath de chaque module du projet. */

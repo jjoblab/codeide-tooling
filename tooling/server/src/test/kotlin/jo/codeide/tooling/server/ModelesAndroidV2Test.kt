@@ -71,6 +71,32 @@ class ModelesAndroidV2Test {
         assertNull(dto.varianteAndroid)
         assertTrue(dto.entries.isEmpty())
         assertTrue(dto.avertissements.isEmpty())
+        // S1-a : modèle riche absent → niveaux Java indécidables (null),
+        // le LSP gardera son défaut « 17 ».
+        assertNull(dto.sourceCompatibility)
+        assertNull(dto.targetCompatibility)
+    }
+
+    // ------------------------------------------------------------------
+    // S1-a : niveaux Java du projet (protocole v10).
+    // ------------------------------------------------------------------
+
+    @Test
+    fun `convertir - javaCompileOptions livre les niveaux source et cible du module`() {
+        val dto =
+            convertisseur.convertir(
+                chemin = ":app",
+                basic = FauxBasicAndroidProject(),
+                android = FauxAndroidProject(javaCompileOptions = FauxJavaCompileOptions("1.8", "1.8")),
+                deps = null,
+                variante = "debug",
+            )
+
+        // La chaîne du tooling voyage BRUTE (« 1.8 » — notation historique
+        // Gradle) : la normalisation « 1.x » → « x » est le travail du
+        // modèle LSP (une seule normalisation, à la frontière).
+        assertEquals("1.8", dto.sourceCompatibility)
+        assertEquals("1.8", dto.targetCompatibility)
     }
 
     // ------------------------------------------------------------------

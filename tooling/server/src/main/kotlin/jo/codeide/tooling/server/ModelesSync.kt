@@ -191,6 +191,10 @@ internal data class TacheDto(
  * les DEUX sources — les entrées MODULE (path = chemin du module frère)
  * et les noms de modules se correspondent ; [sourceDirs] ne porte que les
  * racines PRINCIPALES, [sourceDirsTest] les racines de tests.
+ *
+ * v10 (S1-a) : les niveaux Java du projet ([sourceCompatibility] /
+ * [targetCompatibility], ex. « 1.8 », « 17 », « 21 ») voyagent avec le
+ * module — `null` = indécidable (le LSP garde son défaut « 17 »).
  */
 internal data class ModuleClasspathDto(
     val name: String,
@@ -203,9 +207,11 @@ internal data class ModuleClasspathDto(
     val ignore: Boolean = false,
     val raisonIgnore: String? = null,
     val avertissements: List<String> = emptyList(),
+    val sourceCompatibility: String? = null,
+    val targetCompatibility: String? = null,
 ) : Serializable {
     private companion object {
-        private const val serialVersionUID: Long = 2L
+        private const val serialVersionUID: Long = 3L
     }
 }
 
@@ -289,13 +295,42 @@ internal fun IdeaModule.versClasspathDto(cheminsParNom: Map<String, String>): Mo
                     }
                 }
             }.distinct()
+    // v10 (S1-a) : niveaux Java du module JVM pur — languageLevel
+    // (sourceCompatibility) et targetBytecodeVersion (targetCompatibility)
+    // de `javaLanguageSettings`. JavaVersion.toString() livre « 1.8 »,
+    // « 11 », « 17 », « 21 » — la notation historique est la CONVENTION du
+    // protocole (le moteur LSP normalise « 1.x » → « x »). Résolution
+    // protégée : un Gradle ancien (UnsupportedMethodException) ou un modèle
+    // absent laissent `null` — le repli défaut « 17 » est total.
+    val niveaux = niveauxJavaIdea()
     return ModuleClasspathDto(
         name = chemin,
         sourceDirs = sources,
         sourceDirsTest = sourcesTest,
         entries = entrees,
+        sourceCompatibility = niveaux.first,
+        targetCompatibility = niveaux.second,
     )
 }
+
+/**
+ * Niveaux Java (source, cible) d'un module Idea — `null` de chaque côté
+ * si le modèle ne les expose pas (Gradle ancien, module sans Java).
+ * Aucune exception ne remonte : le classpath est plus important que ses
+ * métadonnées (règle 14). Expression unique : AUCUN retour anticipé
+ * (detekt ReturnCount).
+ */
+@Suppress("TooGenericExceptionCaught")
+private fun IdeaModule.niveauxJavaIdea(): Pair<String?, String?> =
+    runCatching {
+        val reglages = javaLanguageSettings
+        if (reglages == null) {
+            null to null
+        } else {
+            runCatching { reglages.languageLevel?.toString() to reglages.targetBytecodeVersion?.toString() }
+                .getOrElse { null to null }
+        }
+    }.getOrElse { null to null }
 
 /** Nature d'une entrée de classpath selon son fichier (jar, aar, dossier). */
 private fun natureEntree(fichier: File): String =

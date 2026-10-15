@@ -54,7 +54,13 @@ import org.gradle.tooling.model.gradle.BasicGradleProject
  * Toute méthode AGP est protégée : un projet sans AGP, ou avec un AGP trop
  * ancien pour les modèles v2, renvoie null/leverait — le module retombe
  * sur sa conversion IdeaProject (le repli est total, jamais fatal).
+ *
+ * TooManyFunctions justifié (règle 8) : chaque responsabilité de la
+ * collecte a SA fonction (variante, conversion, graphe, bibliothèque,
+ * AAR, niveaux Java S1-a) — l'extraction plus loin éparpillerait la
+ * lecture du modèle v2 en face à face avec ses faux.
  */
+@Suppress("TooManyFunctions")
 internal object ModelesAndroidV2 {
     /**
      * Collecte les modules Android du build passé par [controleur] —
@@ -166,6 +172,12 @@ internal object ModelesAndroidV2 {
             }
         }
 
+        // v10 (S1-a) : niveaux Java du module Android — `JavaCompileOptions`
+        // du modèle v2 (source/targetCompatibility des scripts Gradle).
+        // Résolution protégée : AGP ancien ou proxy rétif → null (repli
+        // LSP « 17 », jamais d'échec du classpath — règle 14).
+        val niveaux = niveauxJavaAndroid(android)
+
         return ModuleClasspathDto(
             name = chemin,
             sourceDirs = racines.distinct(),
@@ -175,8 +187,28 @@ internal object ModelesAndroidV2 {
             fichiersGeneres = fichiersGeneres.distinct(),
             androidJar = basic.bootClasspath.firstOrNull()?.absolutePath,
             avertissements = avertissements,
+            sourceCompatibility = niveaux.first,
+            targetCompatibility = niveaux.second,
         )
     }
+
+    /**
+     * Niveaux Java (source, cible) d'un module Android — nulls si le
+     * modèle riche est absent ou n'expose pas ses options (AGP ancien,
+     * proxy rétif). Expression unique : AUCUN retour anticipé (detekt
+     * ReturnCount), le repli null-to-null est total.
+     */
+    @Suppress("TooGenericExceptionCaught")
+    private fun niveauxJavaAndroid(android: AndroidProject?): Pair<String?, String?> =
+        runCatching {
+            val options = android?.javaCompileOptions
+            if (options == null) {
+                null to null
+            } else {
+                runCatching { options.sourceCompatibility to options.targetCompatibility }
+                    .getOrElse { null to null }
+            }
+        }.getOrElse { null to null }
 
     /**
      * Traduit le graphe des dépendances de COMPILATION d'un artefact en

@@ -1,1 +1,1 @@
-{"type":"build_request","id":"req-42","protocolVersion":9,"projectDir":"/projets/demo","tasks":["build","test"],"arguments":["--stacktrace"],"buildId":"build-7"}
+{"type":"build_request","id":"req-42","protocolVersion":10,"projectDir":"/projets/demo","tasks":["build","test"],"arguments":["--stacktrace"],"buildId":"build-7"}
