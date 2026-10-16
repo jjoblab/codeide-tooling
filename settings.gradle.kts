@@ -130,6 +130,12 @@ include(":feature:install")
 include(":feature:editor")
 // Terminal T5 : écran plein écran du terminal (prompt Terminal-1, section 5).
 include(":feature:terminal")
+// Previews PE6-0 (maquette docs/mockups/apercu-xml.html § « Activité
+// dédiée ») : PreviewActivity — le panneau d'aperçu XML quitte
+// l'overlay d'EditorActivity pour son propre écran, sur le patron du
+// terminal (AppNavigator.openPreview, session partagée par le port
+// SourceApercu de :core:domain).
+include(":feature:preview")
 
 // Outils (hors application — étape 9, ADR 0019 : harnais de vérification).
 include(":tools:generateur")
