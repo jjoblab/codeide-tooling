@@ -190,6 +190,14 @@ class ModuleRulesPlugin : Plugin<Project> {
         // de session de projet (Kotlin JVM pur, même famille core).
         chemin == ":feature:editor" ->
             setOf(":core:ui", ":core:domain", ":core:model", ":lsp:host", ":core:session", ":preview:xml")
+        // Previews PE6-0 (maquette docs/mockups/apercu-xml.html) : l'écran
+        // d'aperçu dédié consomme le moteur :preview:xml (le moteur de
+        // rendu y reste confiné — la feature ne voit JAMAIS LayoutLib en
+        // direct) + le trio feature standard ; la session d'édition y
+        // arrive par le port SourceApercu de :core:domain (registre
+        // singleton — jamais la bibliothèque d'édition).
+        chemin == ":feature:preview" ->
+            setOf(":core:ui", ":core:domain", ":core:model", ":preview:xml")
         // Mission « Previews » (PREVIEW.md PE1, P1–P5) : le moteur de
         // preview XML ne dépend que des contrats du domaine (dispatchers,
         // journal) — la dépendance LayoutLib y est confinée. PE2 ajoutera
