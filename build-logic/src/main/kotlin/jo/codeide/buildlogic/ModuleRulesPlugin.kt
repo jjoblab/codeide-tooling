@@ -195,9 +195,11 @@ class ModuleRulesPlugin : Plugin<Project> {
         // rendu y reste confiné — la feature ne voit JAMAIS LayoutLib en
         // direct) + le trio feature standard ; la session d'édition y
         // arrive par le port SourceApercu de :core:domain (registre
-        // singleton — jamais la bibliothèque d'édition).
+        // singleton — jamais la bibliothèque d'édition). PE7c : la bulle
+        // et le mode de la palette se PERSISTENT dans SettingsDataStore
+        // (maquette § « Bulle, palette et popup de placement »).
         chemin == ":feature:preview" ->
-            setOf(":core:ui", ":core:domain", ":core:model", ":preview:xml")
+            setOf(":core:ui", ":core:domain", ":core:model", ":core:datastore", ":preview:xml")
         // Mission « Previews » (PREVIEW.md PE1, P1–P5) : le moteur de
         // preview XML ne dépend que des contrats du domaine (dispatchers,
         // journal) — la dépendance LayoutLib y est confinée. PE2 ajoutera
