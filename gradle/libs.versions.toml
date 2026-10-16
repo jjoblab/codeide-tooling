@@ -41,12 +41,23 @@ androidx-recyclerview = "1.4.0"
 androidx-swiperefreshlayout = "1.2.0"  # vérifiée sur Google Maven (dernière stable)
 androidx-viewpager2 = "1.1.0"
 # Bibliothèque d'édition (prompt compagnon, section 2.2) — tag stable vérifié
-# sur github.com/jjoblab/code-editor le 2026-10-15 ; artefacts JitPack vérifiés
-# (cel-ui / cel-lsp / cel-lsp-api 3.71.0 : POM résolus HTTP 200 le 2026-10-15). Montée
-# 3.70.1 → 3.71.0 (v0.134.12) : exécution du plan d'audit 3.69.0 (lots L1→L10).
-# UNE rupture consommée par CodeIDE (plan 03 — inversion cel-lsp → cel-ui) :
-# LspEditor.setEditorView(EditorView) → setHost(EditorHost) ; l'adaptation
-# est l'une-ligne fournie par l'amont — editeur.setHost(LspEditorViewHost(vue))
+# sur github.com/jjoblab/code-editor le 2026-10-16 ; artefacts JitPack vérifiés
+# (cel-ui / cel-lsp / cel-lsp-api 3.72.0 : build JitPack « ok » le 2026-10-16).
+# Montée 3.71.0 → 3.72.0 (v0.134.23) : multi-langages ADR-002 (C1→C3→C2/C4) —
+# TEXTMATE NON CONSOMMÉ (consigne propriétaire : pas encore stable ; le module
+# :cel-textmate et les grammaires embarquées restent hors du graphe CodeIDE —
+# CodeIDE ne consomme que cel-ui + cel-lsp, la bascule démo est opt-in).
+# Consommé du lot : C4 = palette EditorTheme étendue (8 clés syntax.* virtuelles,
+# additive) ; C1 = politique de porte de complétion devenue donnée du profil
+# (CompletionGate — XML porte écartée préservé, LOG jamais ; comportement
+# identique côté hôte) ; correctifs retour terrain (RegexCompat classes POSIX,
+# captures vide/imbriquées, porte 5 000 caractères/ligne). Aucune rupture
+# d'API 3.71.0 → 3.72.0 (vérifié : cel-ui = EditorTheme + EditorCompletionPopup
+# seulement, cel-lsp/cel-lsp-api = README).
+# Historique — montée 3.70.1 → 3.71.0 (v0.134.12) : plan d'audit 3.69.0
+# (lots L1→L10). UNE rupture consommée par CodeIDE (plan 03 — inversion
+# cel-lsp → cel-ui) : LspEditor.setEditorView(EditorView) → setHost(EditorHost) ;
+# l'adaptation est l'une-ligne fournie par l'amont — editeur.setHost(LspEditorViewHost(vue))
 # (CoordonnateurLsp). Le reste est compatible : plan 01 = extractions d'état
 # d'EditorView (view/state/ CompletionState, FindState, ScrollState) avec API
 # publique inchangée (getVOffset/getHOffset délèguent, champs internalisés non
@@ -59,7 +70,7 @@ androidx-viewpager2 = "1.1.0"
 # Montée 3.49.2 → 3.69.0 (v0.122.2) : compat API vérifiée par le guide
 # MISE-A-JOUR-CODEIDE.md (docs/ du dépôt code-editor) — plage additive.
 # CodeEditor côté CodeIDE ne change pas (les deux modules suivent version.ref).
-code-editor = "3.71.0"
+code-editor = "3.72.0"
 # Termux terminal-emulator (Apache-2.0) : sessions shell via pty — v0.118.3
 # vérifiée sur JitPack le 2026-09-23 (com.github.termux.termux-app).
 termux = "v0.118.3"
