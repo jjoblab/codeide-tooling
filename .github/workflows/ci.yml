@@ -1,0 +1,27 @@
+# codeide-tooling — CI JVM pure (pas de SDK Android).
+# Miroir allégé de la CI CodeIDE (ADR 0037) : la chaîne complète, hors app.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verification:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: JDK 21 Temurin
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Setup Gradle (cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Chaîne de vérification (spotless, detekt, règles, tests, shadowJar)
+        run: ./gradlew spotlessCheck detekt checkModuleDependencies test :tooling:server:shadowJar --stacktrace
