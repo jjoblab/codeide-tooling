@@ -1,0 +1,13 @@
+# Exemption ciblée pour :tools:generateur uniquement.
+#
+# Ce module n'est PAS du code applicatif : c'est un outil de ligne de commande
+# piloté par scripts/verify-templates.sh (ADR 0019). Sa sortie standard est
+# le RÉSULTAT de l'outil (protocole « OK <id> … » lu par le script), pas de
+# la journalisation : la règle 14 (toute journalisation passe par AppLogger)
+# vise le traçage du code applicatif, pas l'impression d'un livrable.
+#
+# Seule l'interdiction des méthodes d'impression est levée — le reste de la
+# configuration detekt (maxIssues = 0) reste intégralement actif.
+style:
+  ForbiddenMethodCall:
+    active: false

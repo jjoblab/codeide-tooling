@@ -1,0 +1,37 @@
+# Configuration detekt commune à tous les modules.
+# Complète la configuration par défaut (buildUponDefaultConfig = true).
+
+build:
+  # Règle 9 du prompt maître : aucune vérification n'est desserrée pour
+  # « faire passer » le build — detekt échoue dès le premier constat.
+  maxIssues: 0
+
+style:
+  # Règle 14 : la journalisation passe exclusivement par AppLogger.
+  # Interdiction de android.util.Log, println et printStackTrace hors
+  # core:logging et core:crash (exemptés via un second fichier de config).
+  ForbiddenMethodCall:
+    active: true
+    methods:
+      - 'android.util.Log.d'
+      - 'android.util.Log.e'
+      - 'android.util.Log.i'
+      - 'android.util.Log.v'
+      - 'android.util.Log.w'
+      - 'android.util.Log.wtf'
+      - 'android.util.Log.println'
+      - 'kotlin.io.println'
+      - 'kotlin.io.print'
+      - 'java.lang.Throwable.printStackTrace'
+  # Règle 4 : pas de suppression d'avertissement non justifiée.
+  # `ForbiddenPublicDataClass` n'est plus dans le ruleset `style` (dépréciée
+  # depuis detekt 1.23.x : migrée vers le ruleset `libraries`, non activé
+  # ici). Les data class publiques restent donc autorisées par défaut,
+  # comme voulu par les modèles de l'UI.
+
+exceptions:
+  # Règle 4 : les catch génériques qui avalent l'erreur sont interdits.
+  SwallowedException:
+    active: true
+  TooGenericExceptionCaught:
+    active: false # le domaine capture volontairement des exceptions génériques avant typage
