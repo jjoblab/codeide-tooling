@@ -10,8 +10,27 @@
 plugins {
     id("codeide.kotlin.library")
     alias(libs.plugins.kover)
+    id("maven-publish")
 }
 
 dependencies {
     api(project(":tooling:protocol"))
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+        }
+    }
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/jjoblab/codeide-tooling")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
 }

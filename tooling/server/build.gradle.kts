@@ -10,6 +10,7 @@
 
 plugins {
     id("codeide.tooling.server")
+    id("maven-publish")
 }
 
 dependencies {
@@ -53,6 +54,27 @@ kover {
                 bound {
                     minValue.set(75)
                 }
+            }
+        }
+    }
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            // Le composant SHADOW publie le JAR unique exécutable
+            // (gradle-server.jar, classifier « all ») — c'est l'artefact
+            // consommé par CodeIDE pour ses assets.
+            from(components["shadow"])
+        }
+    }
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/jjoblab/codeide-tooling")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
             }
         }
     }

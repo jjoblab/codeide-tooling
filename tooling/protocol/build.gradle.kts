@@ -11,9 +11,28 @@ plugins {
     id("codeide.kotlin.library")
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.kover)
+    id("maven-publish")
 }
 
 dependencies {
     // Sérialisation JSON des messages (§3.2) — la seule dépendance.
     api(libs.kotlinx.serialization.json)
+}
+
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+        }
+    }
+    repositories {
+        maven {
+            name = "GitHubPackages"
+            url = uri("https://maven.pkg.github.com/jjoblab/codeide-tooling")
+            credentials {
+                username = System.getenv("GITHUB_ACTOR")
+                password = System.getenv("GITHUB_TOKEN")
+            }
+        }
+    }
 }
