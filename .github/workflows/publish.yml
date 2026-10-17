@@ -1,0 +1,46 @@
+# codeide-tooling — publication des artefacts sur GitHub Packages.
+#
+# Déclenchée par un tag v* (release) ou manuellement (SNAPSHOT local du
+# moment). Le GITHUB_TOKEN du dépôt suffit (packages: write) — aucun
+# secret supplémentaire. Les CONSUMMATEURS hors dépôt (CodeIDE) ont
+# besoin d'un PAT read:packages pour résoudre ces coordonnées.
+#
+# Coordonnées (convention JitPack multi-modules) :
+#   com.github.jjoblab.codeide-tooling:protocol / api / testing (JAR)
+#   com.github.jjoblab.codeide-tooling:server (gradle-server.jar shadow)
+name: Publication GitHub Packages
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: pub-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publier:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer les sources
+        uses: actions/checkout@v4
+
+      - name: JDK 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Gradle (cache)
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Publier (composants java + shadow)
+        run: ./gradlew publish --stacktrace
+        env:
+          GITHUB_ACTOR: ${{ github.actor }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
