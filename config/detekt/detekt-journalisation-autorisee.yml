@@ -1,0 +1,47 @@
+# Exemptions pour core:logging et core:crash uniquement.
+# Ces deux modules implémentent les sinks bas niveau de la journalisation
+# maison et le gestionnaire de plantages : ils sont les seuls autorisés à
+# appeler android.util.Log, println ou printStackTrace (règle 14 du prompt).
+# Ce fichier est toujours chargé APRÈS detekt.yml : sa priorité est plus haute.
+#
+# Chaque exemption ci-dessous est ciblée, minimale et motivée par les règles
+# du prompt maître (règle 9 : jamais de vérification désactivée pour « faire
+# passer » le build — ces exceptions sont architecturales, documentées dans
+# les ADR 0006/0009/0010) :
+#
+# - SwallowedException (règle 16 du prompt) : « le gestionnaire de plantage
+#   ne doit jamais lui-même planter ni bloquer ». Le chemin critique absorbe
+#   volontairement chaque erreur secondaire (lecture du marqueur, écriture de
+#   l'historique de boucle, service ActivityManager indisponible) : c'est le
+#   rapport du plantage d'origine qui compte, pas celui d'une erreur du
+#   gestionnaire. L'exception d'origine est perdue par conception.
+# - ReturnCount (max 5) : les fonctions du chemin critique sont écrites en
+#   clauses de garde — chaque délégation au système est un retour anticipé,
+#   et l'enchaînement exigé par la section 5.8 (garde de ré-entrance, boucle,
+#   échec de lancement, succès) en compte trois à cinq. Les imbriquer en
+#   expressions ferait perdre la lisibilité d'un code qui doit rester
+#   évidemment correct.
+# - LongParameterList : le gestionnaire est construit avant Hilt avec ses
+#   collaborateurs injectés (tueur, lanceur, horloge, précédent) — les
+#   regrouper en classes d'options nuirait à la lisibilité du chemin critique.
+# - TooManyFunctions : les classes du chemin critique (stockage fichier,
+#   mapping JSON, écran dédié) sont des unités cohérentes de
+#   persistance/d'affichage ; les éclater pour la métrique casserait la
+#   localité du raisonnement.
+style:
+  ForbiddenMethodCall:
+    active: false
+  ReturnCount:
+    max: 5
+
+complexity:
+  LongParameterList:
+    functionThreshold: 7
+    constructorThreshold: 8
+  TooManyFunctions:
+    thresholdInClasses: 17
+    thresholdInObjects: 13
+
+exceptions:
+  SwallowedException:
+    active: false

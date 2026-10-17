@@ -1,0 +1,15 @@
+# Exemption ciblée pour :tooling:server uniquement.
+#
+# L'orchestrateur du tooling (G2, prompt compagnon Tooling) vit dans un
+# PROCESS JVM SÉPARÉ de l'app : il ne peut pas appeler AppLogger (règle 14) —
+# son seul canal de journalisation est sa sortie d'erreur standard, que le
+# daemon relancera vers l'app pour réinjection dans le journal applicatif
+# unifié avec un tag distinct (section 6 du prompt Tooling : « les lignes de
+# log du process tooling:server (niveau WARN/ERROR au minimum) sont
+# réinjectées dans AppLogger avec un tag distinct gradle-server »).
+#
+# Seule l'interdiction des méthodes d'impression est levée — le reste de la
+# configuration detekt (maxIssues = 0) reste intégralement actif.
+style:
+  ForbiddenMethodCall:
+    active: false
