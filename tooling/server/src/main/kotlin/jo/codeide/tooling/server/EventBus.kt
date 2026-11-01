@@ -58,7 +58,16 @@ internal class EventBusSocket(
 
     override fun publier(evenement: ToolingEvent) {
         // put() bloquant : contre-pression sur l'émetteur, aucune perte.
-        file.put(evenement)
+        // Phase 1 (T1) : l'attente ÉVENTUELLE du put() se mesure quand
+        // l'instrumentation est active — c'est la contre-pression ressentie
+        // par les fils de pompage de Gradle eux-mêmes.
+        if (InstrumentationTransport.active) {
+            val depart = System.currentTimeMillis()
+            file.put(evenement)
+            InstrumentationTransport.enregistrerAttentePublication(System.currentTimeMillis() - depart)
+        } else {
+            file.put(evenement)
+        }
     }
 
     override fun taille(): Int = file.size
@@ -71,7 +80,20 @@ internal class EventBusSocket(
                 try {
                     while (actif || file.isNotEmpty()) {
                         val evenement = file.poll(POLL_VIDE_MS, TimeUnit.MILLISECONDS) ?: continue
-                        socket.envoyer(ProtocolJson.encoder(evenement).encodeToByteArray())
+                        // Phase 1 (T2) : durée poll → encodage → envoyer PAR
+                        // événement, et comptage par type (angle mort n°5 :
+                        // la composition du trafic — tâches, progression, tas,
+                        // diagnostics… — n'était pas connue).
+                        if (InstrumentationTransport.active) {
+                            val depart = System.currentTimeMillis()
+                            socket.envoyer(ProtocolJson.encoder(evenement).encodeToByteArray())
+                            InstrumentationTransport.enregistrerEvenement(
+                                evenement::class.simpleName ?: "anonyme",
+                                System.currentTimeMillis() - depart,
+                            )
+                        } else {
+                            socket.envoyer(ProtocolJson.encoder(evenement).encodeToByteArray())
+                        }
                         // v0.49.0 (ADR 0080) : profondeur anormale = l'écriture
                         // vers l'app ne suit pas — le retard se NOMME en se
                         // formant, pas à la fin du build.
@@ -117,6 +139,9 @@ internal class EventBusSocket(
         consommateur?.interrupt()
         consommateur?.join(ATTENTE_JOINTURE_MS)
     }
+
+    /** Identifiant du fil consommateur (T2b/T3b), -1 s'il n'a jamais démarré. */
+    fun idFilConsommateur(): Long = consommateur?.threadId() ?: -1L
 
     /** Datation du dernier avertissement de retard (bornage du débit). */
     private val dernierAvertissementMs =

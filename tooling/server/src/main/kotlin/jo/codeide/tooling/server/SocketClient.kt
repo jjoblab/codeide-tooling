@@ -14,6 +14,7 @@ import java.nio.file.Path
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
@@ -42,19 +43,61 @@ import kotlin.concurrent.thread
  * en plein build, retour terrain v0.48.0). L'ordre RELATIF pong/événements
  * peut s'inverser, sans conséquence (le pong ne porte aucune relation
  * d'ordre, cf. v0.37.3).
+ *
+ * Phase 1 (angle mort n°3) : la file normale porte des [FrameFile] horodatées
+ * à l'enfilement — la profondeur maximale ET l'âge de la plus ancienne frame
+ * se mesurent ENFIN (l'alerte historique ne se déclenchait qu'à 512 frames,
+ * hors d'atteinte du scénario du propriétaire : ≈ 60 lignes). La règle
+ * d'alerte devient relative et temporelle : profondeur ≥ 32 OU âge ≥ 1 s.
+ * L'[InstrumentationTransport] (T1b/T2b) complète ces mesures quand le
+ * drapeau `--instru-transport` est actif.
+ *
+ * Exemption detekt ciblée (règle 16) : TooManyFunctions — chaque fonction
+ * est une pièce du contrat (écrire, lire, fermer) OU du diagnostic Phase 1
+ * (profondeur, statistiques, identifiant du fil) ; les regrouper en une
+ * classe « stats » séparée exigerait de partager les états internes de la
+ * file, précisément ce que l'unicité d'écrivain interdit.
  */
+@Suppress("TooManyFunctions")
 internal class SocketClient private constructor(
     private val canal: SocketChannel,
 ) {
+    /** Nombre d'appels `write` observés par le compteur (T2b), 0 sinon. */
+    private val appelsEcriture = AtomicLong(0L)
+
+    /** Datation du dernier avertissement de profondeur (bornage du débit). */
+    private val dernierAvertissementMs = AtomicLong(0L)
+
+    /** Profondeur maximale de la file normale depuis le dernier relevé. */
+    private val profondeurMax = AtomicInteger(0)
+
+    /** Âge maximal (ms) d'une frame au moment de son écriture. */
+    private val ageMaxMs = AtomicLong(0L)
+
     private val entree: InputStream = Channels.newInputStream(canal)
-    private val sortie: OutputStream = Channels.newOutputStream(canal)
+
+    /**
+     * Sortie brute du canal, ÉVENTUELLEMENT enveloppée d'un compteur
+     * d'appels système (T2b — actif avec `--instru-transport` uniquement) :
+     * [FrameCodec.writeFrame] écrit 4 octets d'en-tête + payload + flush ;
+     * le compteur PROUVE le nombre d'appels `write` par frame au lieu de le
+     * supposer.
+     */
+    private val sortie: OutputStream =
+        if (InstrumentationTransport.active) {
+            CompteurAppels(Channels.newOutputStream(canal), appelsEcriture)
+        } else {
+            Channels.newOutputStream(canal)
+        }
 
     /**
      * File FIFO des frames normales (événements, réponses d'erreur) :
      * bornée, [envoyer] BLOQUE sous contre-pression — la sémantique
-     * sans perte de l'[EventBus] est conservée de bout en bout.
+     * sans perte de l'[EventBus] est conservée de bout en bout. Chaque
+     * entrée porte son instant d'enfilement (angle mort n°3 : l'âge de la
+     * plus ancienne frame ne se devine pas, il se mesure).
      */
-    private val fileNormale = ArrayBlockingQueue<ByteArray>(CAPACITE_FILE)
+    private val fileNormale = ArrayBlockingQueue<FrameFile>(CAPACITE_FILE)
 
     /**
      * File prioritaire des frames de SANTÉ (pong) : non bornée par
@@ -69,9 +112,6 @@ internal class SocketClient private constructor(
     @Volatile
     private var actif = false
 
-    /** Datation du dernier avertissement de profondeur (bornage du débit). */
-    private val dernierAvertissementMs = AtomicLong(0L)
-
     /** Écrit une frame complète (en-tête + payload). */
     fun envoyer(payload: ByteArray) {
         if (ecrivain == null) {
@@ -79,7 +119,8 @@ internal class SocketClient private constructor(
             synchronized(this) { FrameSocket.ecrireFrame(sortie, payload) }
         } else {
             // put() bloquant : contre-pression vers l'émetteur, aucune perte.
-            fileNormale.put(payload)
+            fileNormale.put(FrameFile(payload, System.currentTimeMillis()))
+            InstrumentationTransport.enregistrerProfondeurFileEcriture(fileNormale.size, enfilement = true)
         }
     }
 
@@ -108,23 +149,20 @@ internal class SocketClient private constructor(
             thread(isDaemon = true, name = "gradle-server-ecrivain") {
                 try {
                     while (actif || fileNormale.isNotEmpty() || filePrioritaire.isNotEmpty()) {
-                        // Priorité santé d'abord : un pong en attente passe
-                        // devant TOUT événement en file.
-                        val frame =
-                            filePrioritaire.pollFirst()
-                                ?: fileNormale.poll(INTERVALLE_MS, TimeUnit.MILLISECONDS)
-                                ?: continue
-                        FrameSocket.ecrireFrame(sortie, frame)
-                        // v0.49.0 (diagnostic latence) : la profondeur de
-                        // la file normale nomme le retard d'écriture vers
-                        // l'app — c'est le seul endroit où il se mesure.
-                        avertirSiProfondeur()
+                        ecrireProchaineFrame()
                     }
                 } catch (interruption: InterruptedException) {
-                    // arrêt demandé : vider ce qui reste, au mieux.
+                    // arrêt demandé : vider ce qui reste, au mieux — la file
+                    // prioritaire (ByteArray) et la file normale (FrameFile)
+                    // se vident séparément, chacune dans l'ordre.
+                    var framePrioritaire = filePrioritaire.pollFirst()
+                    while (framePrioritaire != null) {
+                        runCatching { FrameSocket.ecrireFrame(sortie, framePrioritaire) }
+                        framePrioritaire = filePrioritaire.pollFirst()
+                    }
                     while (true) {
-                        val frame = filePrioritaire.pollFirst() ?: fileNormale.poll() ?: break
-                        runCatching { FrameSocket.ecrireFrame(sortie, frame) }
+                        val frame = fileNormale.poll() ?: break
+                        runCatching { FrameSocket.ecrireFrame(sortie, frame.octets) }
                     }
                 } catch (t: Throwable) {
                     Journal.error("écrivain du socket interrompu : ${t.message}", t)
@@ -133,23 +171,75 @@ internal class SocketClient private constructor(
     }
 
     /**
-     * Avertit (borné en débit) quand la file normale s'accumule : la
-     * profondeur croissante signale une écriture bloquée vers l'app —
-     * l'opérateur voit le retard SE FORMER au lieu de le découvrir à la
-     * fin du build.
+     * Écrit la prochaine frame en file — priorité santé d'abord (un pong en
+     * attente passe devant TOUT événement), sinon la plus ancienne frame
+     * normale, en mesurant ce qui doit l'être (Phase 1).
      */
-    private fun avertirSiProfondeur() {
+    private fun ecrireProchaineFrame() {
+        val framePrioritaire = filePrioritaire.pollFirst()
+        if (framePrioritaire != null) {
+            FrameSocket.ecrireFrame(sortie, framePrioritaire)
+            return
+        }
+        val frame = fileNormale.poll(INTERVALLE_MS, TimeUnit.MILLISECONDS) ?: return
+        ecrireEnMesurant(frame)
+        // Phase 1 (angle mort n°3) : la profondeur de la file normale nomme
+        // le retard d'écriture vers l'app — et désormais son ÂGE aussi
+        // (règle relative/temporelle).
+        avertirSiRetard(frame)
+    }
+
+    /**
+     * Écrit UNE frame normale en mesurant ce qui doit l'être (Phase 1) :
+     * durée (T2b), appels système (T2b, via [CompteurAppels]) et âge à
+     * l'écriture (T1b — différence entre l'enfilement et maintenant).
+     */
+    private fun ecrireEnMesurant(frame: FrameFile) {
+        val avant = appelsEcriture.get()
+        val depart = System.currentTimeMillis()
+        FrameSocket.ecrireFrame(sortie, frame.octets)
+        val dureeMs = System.currentTimeMillis() - depart
+        InstrumentationTransport.enregistrerEcritureFrame(dureeMs, appelsEcriture.get() - avant)
+        val age = System.currentTimeMillis() - frame.enfileeMs
+        if (age > ageMaxMs.get()) ageMaxMs.updateAndGet { actuel -> maxOf(actuel, age) }
+        InstrumentationTransport.enregistrerAgeFrame(age)
+    }
+
+    /**
+     * Avertit (borné en débit) quand le retard d'écriture se FORME : la
+     * règle historique (profondeur ≥ 512) ne se déclenchait JAMAIS sur le
+     * scénario du propriétaire (≈ 60 lignes) — un retard de 20 s avec une
+     * file à 3 frames restait muet. Nouvelle règle (§3.2) : profondeur
+     * ≥ 32 OU âge de la frame la plus ancienne ≥ 1 s.
+     */
+    private fun avertirSiRetard(frame: FrameFile) {
         val profondeur = fileNormale.size
-        if (profondeur >= SEUIL_ALERTE_FILE) {
-            val maintenant = System.currentTimeMillis()
-            val dernier = dernierAvertissementMs.get()
-            if (maintenant - dernier >= INTERVALLE_ALERTE_MS &&
-                dernierAvertissementMs.compareAndSet(dernier, maintenant)
-            ) {
-                Journal.warn("file d'écriture socket à $profondeur frame(s) — l'app lit en retard")
-            }
+        if (profondeur > profondeurMax.get()) profondeurMax.updateAndGet { actuel -> maxOf(actuel, profondeur) }
+        val age = System.currentTimeMillis() - frame.enfileeMs
+        if (profondeur < SEUIL_ALERTE_PROFONDEUR && age < SEUIL_ALERTE_AGE_MS) return
+        val maintenant = System.currentTimeMillis()
+        val dernier = dernierAvertissementMs.get()
+        if (maintenant - dernier >= INTERVALLE_ALERTE_MS &&
+            dernierAvertissementMs.compareAndSet(dernier, maintenant)
+        ) {
+            Journal.warn(
+                "file d'écriture socket à $profondeur frame(s), plus ancienne âgée de $age ms — l'app lit en retard",
+            )
         }
     }
+
+    /** Profondeur courante de la file d'écriture (conclusion de build, §3.2). */
+    fun profondeurFile(): Int = fileNormale.size
+
+    /** Identifiant du fil écrivain (T2b/T3b), -1 s'il n'a jamais démarré. */
+    fun idFilEcrivain(): Long = ecrivain?.threadId() ?: -1L
+
+    /**
+     * Relevé diagnostique de la file d'écriture pour la ligne de conclusion
+     * d'un build : profondeur finale, maximale atteinte et âge maximal.
+     */
+    fun statistiquesFile(): String =
+        "ecriture: ${fileNormale.size} (max ${profondeurMax.get()}, age max ${ageMaxMs.get()} ms)"
 
     /**
      * Lit une frame complète, bloquant. Lève [java.io.EOFException] sur une
@@ -191,10 +281,13 @@ internal class SocketClient private constructor(
         /** Attente max de fin de l'écrivain à la fermeture. */
         private const val ATTENTE_JOINTURE_MS = 2_000L
 
-        /** Profondeur au-delà de laquelle la file normale est signalée. */
-        private const val SEUIL_ALERTE_FILE = 512
+        /** Profondeur au-delà de laquelle la file normale est signalée (§3.2). */
+        private const val SEUIL_ALERTE_PROFONDEUR = 32
 
-        /** Bornage du débit des avertissements de profondeur (5 s). */
+        /** Âge de la plus ancienne frame au-delà duquel elle est signalée (§3.2). */
+        private const val SEUIL_ALERTE_AGE_MS = 1_000L
+
+        /** Bornage du débit des avertissements de retard (5 s). */
         private const val INTERVALLE_ALERTE_MS = 5_000L
 
         /**
@@ -220,6 +313,43 @@ internal class SocketClient private constructor(
                 throw IOException("Connexion impossible à $chemin dans les $delaiMs ms : ${t.message}", t)
             }
         }
+    }
+}
+
+/**
+ * Frame en file d'écriture, avec son instant d'enfilement (Phase 1, angle
+ * mort n°3) : l'âge de la plus ancienne frame devient mesurable au passage
+ * vers le socket — c'est LUI qui distingue « l'écrivain est lent » de
+ * « l'app ne lit pas ».
+ */
+internal class FrameFile(
+    val octets: ByteArray,
+    val enfileeMs: Long,
+)
+
+/**
+ * Enveloppe comptant les appels `write` sur le flux de sortie (T2b) :
+ * prouve le nombre d'appels système par frame au lieu de le supposer
+ * (hypothèse H-T8 — 4 octets d'en-tête + payload = 5 appels attendus).
+ * Thread-safe par construction (un seul fil écrivain) ; le compteur vit
+ * dans [SocketClient] pour être lu sans contention.
+ */
+private class CompteurAppels(
+    private val flux: OutputStream,
+    private val compteur: AtomicLong,
+) : OutputStream() {
+    override fun write(octet: Int) {
+        flux.write(octet)
+        compteur.incrementAndGet()
+    }
+
+    override fun write(
+        octets: ByteArray,
+        depart: Int,
+        longueur: Int,
+    ) {
+        flux.write(octets, depart, longueur)
+        compteur.incrementAndGet()
     }
 }
 

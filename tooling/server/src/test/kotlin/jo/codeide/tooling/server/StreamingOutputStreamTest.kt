@@ -132,4 +132,33 @@ class StreamingOutputStreamTest {
         StreamingOutputStream("b1", StreamKind.STDOUT, bus).close()
         assertTrue(bus.lignes.isEmpty())
     }
+
+    @Test
+    fun `un filtre qui consomme la ligne l'empeche de publier - Phase 1`() {
+        val bus = bus()
+        val consommees = mutableListOf<String>()
+        StreamingOutputStream(
+            "b1",
+            StreamKind.STDOUT,
+            bus,
+            filtre = { ligne ->
+                val reper = ReperesMetronome.analyser(ligne) != null
+                if (reper) consommees += ligne
+                reper
+            },
+        ).use { sortie ->
+            sortie.write("[[CIDE-T 1 1730000000000]]\nligne reelle\n".toByteArray())
+        }
+        assertEquals(listOf("[[CIDE-T 1 1730000000000]]"), consommees)
+        assertEquals(listOf("ligne reelle"), textes(bus))
+    }
+
+    @Test
+    fun `sans filtre les reperes voyagent comme des lignes normales`() {
+        val bus = bus()
+        StreamingOutputStream("b1", StreamKind.STDOUT, bus).use { sortie ->
+            sortie.write("[[CIDE-T 7 1730000000250]]\n".toByteArray())
+        }
+        assertEquals(listOf("[[CIDE-T 7 1730000000250]]"), textes(bus))
+    }
 }
