@@ -50,6 +50,10 @@ internal class BuildHandler(
     private val bus: EventBus,
     /** Script d'init Gradle de l'injection applog (R2, ADR 0103) — `null` : aucun. */
     private val scriptInitAppLog: String? = null,
+    /** Socket vers l'app — conclusion de build complète (Phase 1, angle mort n°3). */
+    private val socket: SocketClient? = null,
+    /** Métronome de diagnostic (Phase 1, §3.1c) — `null` : aucun. */
+    private val metronome: MetronomeBuild? = null,
 ) {
     /** Publication de la progression du build (statuts, écouteur,
      *  diagnostics stderr) — v0.45.1 : extraite, la classe pompait. */
@@ -78,6 +82,9 @@ internal class BuildHandler(
         val jeton = GradleConnector.newCancellationTokenSource()
         annulations[requete.buildId] = jeton
         val debut = System.currentTimeMillis()
+        // Phase 1 (§3.2) : armement des compteurs de transport et relance du
+        // métronome.
+        armerMesures(requete.buildId)
         bus.publier(
             BuildStarted(
                 id = nouvelId(),
@@ -144,7 +151,24 @@ internal class BuildHandler(
             entrees.remove(requete.buildId)?.let { sortie ->
                 runCatching { sortie.close() }
             }
+            // Phase 1 : arrêt du métronome puis résumé d'instrumentation
+            // APRÈS la publication de la conclusion — les compteurs couvrent
+            // l'émission, le client mesure la réception (sonde
+            // ConsoleLatence).
+            conclureMesures(requete.buildId)
         }
+    }
+
+    /** Phase 1 : arme les compteurs et relance le métronome du daemon. */
+    private fun armerMesures(buildId: String) {
+        InstrumentationTransport.demarrerBuild(buildId)
+        metronome?.relancer()
+    }
+
+    /** Phase 1 : arrête le métronome et journalise le résumé de transport. */
+    private fun conclureMesures(buildId: String) {
+        metronome?.arreter()
+        InstrumentationTransport.conclureBuild(buildId)?.let { Journal.info(it) }
     }
 
     /**
@@ -261,7 +285,9 @@ internal class BuildHandler(
             // script d'init — argument -I devant --console=plain (la
             // DERNIÈRE occurrence d'une option gagne chez Gradle, et le
             // mode texte doit rester le dernier mot de NOTRE contrat).
-            .withArguments(requete.arguments + argumentsInitAppLog() + CONSOLE_TEXTE)
+            // Phase 1 (§3.1c) : le MÉTRONOME de diagnostic voyage pareil,
+            // second -I, sous le drapeau --instru-transport uniquement.
+            .withArguments(requete.arguments + argumentsInitAppLog() + argumentsMetronome() + CONSOLE_TEXTE)
             // v0.39.1 (correctif n°4) : l'observateur du flux stdout allume
             // l'accumulateur de conclusion (synthèse + durée Gradle) dès
             // qu'il voit les lignes de fin. Comme l'observateur est appelé
@@ -274,6 +300,7 @@ internal class BuildHandler(
                     StreamKind.STDOUT,
                     bus,
                     observateur = conclusion::enregistrer,
+                    filtre = filtreReperes(),
                 ),
             ).setStandardError(
                 StreamingOutputStream(
@@ -326,6 +353,7 @@ internal class BuildHandler(
     ) {
         val synthese = conclusion.synthese.get()
         val dureeTotaleMs = System.currentTimeMillis() - debut
+        val files = descriptionFiles()
         // v0.45.2 (décomposition honnête) : cf.
         // PublicateurProgressionBuild.conclusionDurees — l'utilisateur
         // voyait « in 10s » au bout de 200-300 s sans pouvoir nommer
@@ -340,7 +368,7 @@ internal class BuildHandler(
         // d'écriture vers l'app.
         Journal.info(
             "build $buildId conclu : $dureeTotaleMs ms " +
-                "(reussi=$reussi, annule=$annule, gradle=${dureeGradleMs ?: "inconnue"} ms, file=${bus.taille()})",
+                "(reussi=$reussi, annule=$annule, gradle=${dureeGradleMs ?: "inconnue"} ms, file=$files)",
         )
         bus.publier(
             BuildFinished(
@@ -403,4 +431,70 @@ internal class BuildHandler(
      * les projets si l'injection est coupée).
      */
     private fun argumentsInitAppLog(): List<String> = scriptInitAppLog?.let { listOf("-I", it) } ?: emptyList()
+
+    /**
+     * Arguments du métronome de diagnostic (Phase 1, §3.1c) : `-I <script>`
+     * sous le drapeau d'instrumentation uniquement — liste vide sinon
+     * (zéro changement pour les builds de tout le monde).
+     */
+    private fun argumentsMetronome(): List<String> =
+        if (InstrumentationTransport.active) {
+            metronome?.scriptInit?.let { listOf("-I", it) } ?: emptyList()
+        } else {
+            emptyList()
+        }
+
+    /**
+     * Filtre des repères métronome sur le flux stdout (Phase 1) : consomme
+     * le repère (jamais publié) et enregistre son écart à T0. `null` quand
+     * le métronome ou l'instrumentation est inactif — chemin inchangé.
+     */
+    private fun filtreReperes(): ((String) -> Boolean)? =
+        if (InstrumentationTransport.active && metronome != null) {
+            { ligne ->
+                ReperesMetronome.analyser(ligne)?.let { reperes ->
+                    InstrumentationTransport.enregistrerRepere(
+                        System.currentTimeMillis() - reperes.epochMs,
+                        reperes.sequence,
+                    )
+                } != null
+            }
+        } else {
+            null
+        }
+
+    /**
+     * Description des DEUX files pour la ligne de conclusion (Phase 1,
+     * angle mort n°3) : la file d'événements du bus ET la file d'écriture
+     * socket — avec la profondeur maximale atteinte et l'âge maximal, pas
+     * seulement la valeur finale (une file vide à la conclusion ne prouve
+     * RIEN sur le retard qui a précédé).
+     */
+    private fun descriptionFiles(): String =
+        "evenements:${bus.taille()}" +
+            (socket?.let { "/${it.statistiquesFile()}" } ?: "")
+}
+
+/**
+ * Métronome de diagnostic d'un serveur (Phase 1, §3.1c) : script d'init
+ * passé au build par `-I` et fichier d'arrêt surveillé par le fil du daemon
+ * Gradle. [relancer] supprime le fichier d'arrêt (le fil repart pour le
+ * build qui démarre), [arreter] le crée (le fil s'arrête sous 250 ms).
+ */
+internal data class MetronomeBuild(
+    val scriptInit: String,
+    val fichierArret: java.io.File,
+) {
+    /** Supprime le fichier d'arrêt — le métronome du daemon repart. */
+    fun relancer() {
+        runCatching { fichierArret.delete() }
+    }
+
+    /** Crée le fichier d'arrêt — le métronome du daemon s'arrête. */
+    fun arreter() {
+        runCatching {
+            fichierArret.parentFile?.mkdirs()
+            fichierArret.writeText("arret\n")
+        }
+    }
 }

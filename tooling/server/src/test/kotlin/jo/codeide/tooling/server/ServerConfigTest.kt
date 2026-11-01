@@ -84,4 +84,69 @@ class ServerConfigTest {
             },
         )
     }
+
+    @Test
+    fun `l instrumentation de transport est un drapeau sans valeur - Phase 1`() {
+        val config =
+            ServerConfig.analyser(
+                arrayOf("--socket", "/s", "--secret", "x", "--instru-transport"),
+            )
+        assertEquals(true, config.instrumentationTransport)
+        assertEquals(null, config.banc)
+    }
+
+    @Test
+    fun `le banc socket seul lit ses parametres avec ses defauts - Phase 1`() {
+        val config =
+            ServerConfig.analyser(
+                arrayOf(
+                    "--socket",
+                    "/s",
+                    "--secret",
+                    "x",
+                    "--banc-socket-seul",
+                    "--banc-lignes",
+                    "10000",
+                    "--banc-cadence-ms",
+                    "50",
+                    "--banc-longueur-ligne",
+                    "200",
+                    "--banc-contenu",
+                    "multi",
+                ),
+            )
+        assertNotNull(config.banc)
+        assertEquals(10_000, config.banc!!.lignes)
+        assertEquals(50L, config.banc!!.cadenceMs)
+        assertEquals(200, config.banc!!.longueurLigne)
+        assertEquals(ServerConfig.ContenuLigneBanc.MULTI, config.banc!!.contenu)
+
+        val defauts =
+            ServerConfig.analyser(arrayOf("--socket", "/s", "--secret", "x", "--banc-socket-seul"))
+        assertNotNull(defauts.banc)
+        assertEquals(ServerConfig.BANC_LIGNES_DEFAUT, defauts.banc!!.lignes)
+        assertEquals(ServerConfig.BANC_CADENCE_MS_DEFAUT, defauts.banc!!.cadenceMs)
+        assertEquals(ServerConfig.BANC_LONGUEUR_LIGNE_DEFAUT, defauts.banc!!.longueurLigne)
+        assertEquals(ServerConfig.ContenuLigneBanc.PLAIN, defauts.banc!!.contenu)
+    }
+
+    @Test
+    fun `un contenu de banc inconnu est rejete avec un message clair`() {
+        val erreur =
+            assertThrows(IllegalArgumentException::class.java) {
+                ServerConfig.analyser(
+                    arrayOf("--socket", "/s", "--secret", "x", "--banc-socket-seul", "--banc-contenu", "bof"),
+                )
+            }
+        assertEquals(true, erreur.message?.contains("bof") == true)
+    }
+
+    @Test
+    fun `les parametres du banc ne font rien sans le drapeau du banc`() {
+        val config =
+            ServerConfig.analyser(
+                arrayOf("--socket", "/s", "--secret", "x", "--banc-lignes", "42"),
+            )
+        assertEquals(null, config.banc)
+    }
 }

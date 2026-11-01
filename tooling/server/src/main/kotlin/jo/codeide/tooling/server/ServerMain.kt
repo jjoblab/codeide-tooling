@@ -39,7 +39,7 @@ public object ServerMain {
                 return CODE_ARGUMENTS
             }
         Journal.niveau = config.niveauJournal
-        Journal.info("orchestrateur ${ServerVersion.CURRENT} — socket ${config.cheminSocket}")
+        positionnerInstrumentation(config)
 
         val socket =
             try {
@@ -51,6 +51,7 @@ public object ServerMain {
 
         val pool = GradleConnectorPool()
         val bus = EventBusSocket(socket)
+        val metronome = genererMetronome(config)
         val dispatcher =
             MessageDispatcher(
                 socket,
@@ -58,6 +59,7 @@ public object ServerMain {
                 bus,
                 config.intervalleTasMs,
                 genererScriptAppLog(config)?.absolutePath,
+                metronome,
             )
 
         Runtime.getRuntime().addShutdownHook(
@@ -76,7 +78,14 @@ public object ServerMain {
             // seul écrit en direct, avant ce démarrage.
             socket.demarrerEcrivain()
             bus.demarrer()
+            // Phase 1 (T2b/T3b) : les fils mesurés existent désormais —
+            // l'instrumentation connaît leurs identifiants (CPU, schedstat).
+            InstrumentationTransport.brancherFils(socket.idFilEcrivain(), bus.idFilConsommateur())
             dispatcher.demarrerSurveillance()
+            // Phase 1 (§3.1b) : mode BANC — émission de la séquence AVANT la
+            // boucle de réception (qui reprend ensuite : le pong de santé
+            // répond, l'app reste connectée et sa console affiche le cycle).
+            config.banc?.let { banc -> BancSocketSeul.executer(bus, banc) }
             dispatcher.boucle()
             return 0
         } catch (echec: EchecHandshake) {
@@ -89,6 +98,19 @@ public object ServerMain {
             bus.arreter()
             pool.close()
             socket.fermer()
+        }
+    }
+
+    /**
+     * Phase 1 (règle 10) : le drapeau d'instrumentation se positionne AVANT
+     * la construction du [SocketClient] (son flux compteur d'appels système,
+     * T2b, s'enveloppe à la création) et avant tout handler.
+     */
+    private fun positionnerInstrumentation(config: ServerConfig) {
+        InstrumentationTransport.active = config.instrumentationTransport
+        Journal.info("orchestrateur ${ServerVersion.CURRENT} — socket ${config.cheminSocket}")
+        if (config.instrumentationTransport) {
+            Journal.info("instru: instrumentation transport ACTIVEE (--instru-transport)")
         }
     }
 
@@ -112,6 +134,27 @@ public object ServerMain {
                 )
             }
         }
+
+    /**
+     * Métronome de diagnostic (Phase 1, §3.1c) : généré une fois par vie du
+     * serveur QUAND l'instrumentation est active — script d'init passé aux
+     * builds par `-I` (comme l'applog) et fichier d'arrêt que le fil du
+     * daemon surveille. `null` sinon : aucun fichier écrit, aucun argument.
+     */
+    private fun genererMetronome(config: ServerConfig): MetronomeBuild? {
+        if (!config.instrumentationTransport) return null
+        val parent = java.io.File(config.cheminSocket).parentFile ?: return null
+        val script = java.io.File(parent, CoordonneesMetronome.NOM_SCRIPT_INIT)
+        val arret = java.io.File(parent, CoordonneesMetronome.NOM_FICHIER_ARRET)
+        GenerateurScriptMetronome.ecrire(script, arret)
+        // Arrêt posé d'emblée : le métronome ne tourne qu'ENTRE le début et
+        // la conclusion d'un build (BuildHandler le relance/supprime).
+        runCatching {
+            arret.parentFile?.mkdirs()
+            arret.writeText("arret\n")
+        }
+        return MetronomeBuild(scriptInit = script.absolutePath, fichierArret = arret)
+    }
 
     /** Point d'entrée process : convertit le code de [executer] en arrêt. */
     @JvmStatic

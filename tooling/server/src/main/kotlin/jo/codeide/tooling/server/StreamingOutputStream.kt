@@ -28,6 +28,13 @@ internal class StreamingOutputStream(
     private val flux: StreamKind,
     private val bus: EventBus,
     private val observateur: ((String) -> Unit)? = null,
+    /**
+     * Filtre de lignes consommées par le diagnostic (Phase 1, §3.1c) :
+     * `true` = la ligne N'EST PAS publiée (repère métronome — elle ne doit
+     * jamais devenir un [jo.codeide.tooling.protocol.BuildOutput]).
+     * `null` (défaut) : aucune ligne filtrée, comportement inchangé.
+     */
+    private val filtre: ((String) -> Boolean)? = null,
 ) : OutputStream() {
     private val tampon = ByteArrayOutputStream()
     private val verrou = Any()
@@ -82,17 +89,19 @@ internal class StreamingOutputStream(
         }
         if (octets.isEmpty()) return
         val texte = octets.toString(Charsets.UTF_8)
-        observateur?.invoke(texte)
-        bus.publier(
-            BuildOutput(
-                id = nouvelId(),
-                protocolVersion = jo.codeide.tooling.protocol.GradleProtocol.PROTOCOL_VERSION,
-                buildId = buildId,
-                stream = flux,
-                line = texte,
-                timestampMs = System.currentTimeMillis(),
-            ),
-        )
+        if (filtre?.invoke(texte) != true) {
+            observateur?.invoke(texte)
+            bus.publier(
+                BuildOutput(
+                    id = nouvelId(),
+                    protocolVersion = jo.codeide.tooling.protocol.GradleProtocol.PROTOCOL_VERSION,
+                    buildId = buildId,
+                    stream = flux,
+                    line = texte,
+                    timestampMs = System.currentTimeMillis(),
+                ),
+            )
+        }
     }
 
     private fun chercherFinLigne(
