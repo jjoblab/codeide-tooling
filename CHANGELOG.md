@@ -1,5 +1,31 @@
 # Changelog — codeide-tooling
 
+## [Non publié] — branche `audit/performance-niveau-studio` (Phase 3 : audit de performance et plan « niveau Android Studio »)
+
+- **`docs/AUDIT-PERFORMANCE.md`** (§5.1–§5.2) : mesures bureau réelles
+  (démarrage serveur médiane **123 ms** sur 5 runs, shadowJar 7,7 Mio ;
+  suite serveur 136 tests verts / 20,1 s ; sync chaude 0,30 s, classpath
+  Android v2 5,76 s, dépendances 3,81 s, annulation 0,78 s), analyse du
+  paradoxe « empreinte identique puis sync de 194 s » (la revalidation
+  silencieuse réchauffe le `CacheSync` serveur), abaissement du risque
+  INC-12 (javadoc `ConfigurableLauncher` : `withCancellationToken` existe
+  sur `ModelBuilder`), revue de qualité (concurrence, erreurs,
+  `explicitApi`, protocole, publication) et dette priorisée.
+- **`docs/REFERENCE-ANDROID-STUDIO.md`** (§5.3) : fiches « comment Android
+  Studio le fait » (fenêtre Build, sync, Build Analyzer, indicateurs)
+  depuis les documentations publiques, avec ce qui est portable (coût,
+  priorité) et les **cibles proposées** (< 200 ms première ligne, p95
+  transport < 250 ms, aucune ligne > 1 s après `BuildFinished`, 60 i/s,
+  gel < 100 ms, annulation < 500 ms — à valider).
+- **`docs/PROTOCOLE-CAPTURES-ANDROID-STUDIO.md`** (§5.3) : protocole de
+  build témoin chronométré DANS Android Studio (30–40 min) pour caler les
+  cibles sur des chiffres réels du propriétaire.
+- **`docs/PLAN-AMELIORATIONS.md` étendu** (§5.4) : écarts E1–E9 priorisés
+  impact × effort × risque (empreinte serveur persistée en tête — la
+  réouverture d'un projet inchangé cesse de re-payer la sync), vagues 0–3
+  avec critères de sortie mesurables, séparation nette des
+  responsabilités (tooling / CodeIDE / propriétaire).
+
 ## [Non publié] — branche `mesure/instrumentation-logs` (Phase 1, diagnostic du retard d'affichage)
 
 - **Instrumentation de transport** (drapeau `--instru-transport`, règle 10 :
