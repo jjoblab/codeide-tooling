@@ -182,6 +182,16 @@ debug** (règle 9), l'écart rapporté.
 
 ## 7. Ce qui reste à livrer côté app (branche miroir CodeIDE)
 
+> **LIVRÉ le 2026-11-08 (fin de journée)** : la branche miroir
+> `mesure/instrumentation-logs` de CodeIDE existe — drapeau
+> `instrumentationTransport` + banc réglables dans la carte Diagnostic de
+> la configuration (INC-32 minimum), passage des drapeaux par le daemon à
+> chaque lancement (crochet), T3 détaillé (sonde du fil lecteur, résumé
+> dans la ligne `ConsoleLatence`), T5/T6 (tag `ConsoleVue`), INC-44
+> (latences et récapitulatif de phases de la sync) et signaux système
+> (tag `PressionMemoire`) — ADR 0152 de CodeIDE. La suite (mise à jour du
+> tableau §3 incluse) reste d'actualité pour l'exécution :
+
 Le volet serveur est complet ; le miroir client (`mesure/instrumentation-logs`
 de CodeIDE) porte : le passage de `--instru-transport` (et des drapeaux du
 banc) par le daemon avec le réglage dans l'écran de configuration (INC-32,
@@ -212,3 +222,7 @@ après la séance appareil. Rien d'autre ne la précède.
   checkModuleDependencies, 166 tests dont 15 intégrations réelles, shadowJar
   8,1 Mo) ; coût JVM mesuré (§5). Vérification appareil : en attente du
   propriétaire.
+- 2026-11-08 (branche `audit/performance-niveau-studio`) : §7 marqué LIVRÉ —
+  la branche miroir CodeIDE `mesure/instrumentation-logs` (ADR 0152) porte
+  le crochet, T3/T5/T6, INC-44 et les signaux système ; T5/T6 du tableau
+  §3 restent à lire sur l'appareil mais l'instrumentation existe désormais.
