@@ -140,8 +140,16 @@ internal class EventBusSocket(
         consommateur?.join(ATTENTE_JOINTURE_MS)
     }
 
-    /** Identifiant du fil consommateur (T2b/T3b), -1 s'il n'a jamais démarré. */
-    fun idFilConsommateur(): Long = consommateur?.threadId() ?: -1L
+    /**
+     * Identifiant JVM du fil consommateur (T2b : `ThreadMXBean`), -1 s'il
+     * n'a jamais démarré.
+     *
+     * `Thread.getId()` plutôt que `threadId()` (JDK 19+) : l'orchestrateur
+     * tourne sur le JDK 17 du toolchain de l'appareil — voir la note
+     * symétrique de [SocketClient.idFilEcrivain] (retour du 2026-11-07).
+     */
+    @Suppress("DEPRECATION")
+    fun idFilConsommateur(): Long = consommateur?.id ?: -1L
 
     /** Datation du dernier avertissement de retard (bornage du débit). */
     private val dernierAvertissementMs =

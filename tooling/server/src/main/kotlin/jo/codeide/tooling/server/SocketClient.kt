@@ -231,8 +231,23 @@ internal class SocketClient private constructor(
     /** Profondeur courante de la file d'écriture (conclusion de build, §3.2). */
     fun profondeurFile(): Int = fileNormale.size
 
-    /** Identifiant du fil écrivain (T2b/T3b), -1 s'il n'a jamais démarré. */
-    fun idFilEcrivain(): Long = ecrivain?.threadId() ?: -1L
+    /**
+     * Identifiant JVM du fil écrivain (T2b : `ThreadMXBean`), -1 s'il n'a
+     * jamais démarré.
+     *
+     * `Thread.getId()` — déprécié depuis le JDK 19 au profit de
+     * `threadId()` — reste le seul nom lisible sur le **JDK 17 de
+     * l'appareil** (toolchain `openjdk-17`, ConfigurationBootstrap côté
+     * app) : `threadId()` est une API JDK 19+ qui tuait l'orchestrateur
+     * au démarrage sur le terrain (retour du 2026-11-07 :
+     * `NoSuchMethodError : 'long java.lang.Thread.threadId()'`, code de
+     * sortie 3, cinq tentatives épuisées). Les deux noms renvoient le
+     * MÊME identifiant séquentiel JVM (vérifié sur JDK 21 : valeurs
+     * identiques pour un même fil) — le contrat de
+     * `ThreadMXBean.getThreadCpuTime` est inchangé.
+     */
+    @Suppress("DEPRECATION")
+    fun idFilEcrivain(): Long = ecrivain?.id ?: -1L
 
     /**
      * Relevé diagnostique de la file d'écriture pour la ligne de conclusion
