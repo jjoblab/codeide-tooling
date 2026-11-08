@@ -31,6 +31,10 @@ internal object EchantillonsMessages {
                 projectDir = "/projets/demo",
                 gradleVersion = "9.7.1",
                 arguments = listOf("--offline"),
+                // INC-31 (Phase 2) : arguments RÉSERVÉS à la sync — vides
+                // chez un client qui ne sépare pas (retombe sur les
+                // généraux), l'échantillon les montre séparés.
+                argumentsSync = listOf("--info"),
             ),
             TasksRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
             DependenciesRequest(ID_REQUETE, VERSION, projectDir = "/projets/demo"),
