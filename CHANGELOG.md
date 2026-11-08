@@ -1,6 +1,14 @@
 # Changelog — codeide-tooling
 
-## [Non publié] — branche `audit/performance-niveau-studio` (Phase 3 : audit de performance et plan « niveau Android Studio »)
+## 1.1.0 (2026-11-08)
+
+Phase 1 (instrumentation du diagnostic « retard d'affichage ») et Phase 3
+(audit de performance, référence Android Studio, plan d'améliorations),
+fusionnées dans `main` le 2026-11-08. Première version publiée sur GitHub
+Packages depuis la réécriture d'identité (la republication de 1.0.0 était
+refusée en 409 — version déjà présente sur le registre).
+
+### Phase 3 — audit de performance et plan « niveau Android Studio »
 
 - **`docs/AUDIT-PERFORMANCE.md`** (§5.1–§5.2) : mesures bureau réelles
   (démarrage serveur médiane **123 ms** sur 5 runs, shadowJar 7,7 Mio ;
@@ -26,7 +34,7 @@
   avec critères de sortie mesurables, séparation nette des
   responsabilités (tooling / CodeIDE / propriétaire).
 
-## [Non publié] — branche `mesure/instrumentation-logs` (Phase 1, diagnostic du retard d'affichage)
+### Phase 1 — instrumentation du diagnostic « retard d'affichage »
 
 - **Instrumentation de transport** (drapeau `--instru-transport`, règle 10 :
   désactivable, coût mesuré ≈ +1 µs/ligne sur banc JVM) : T1 (attente du
