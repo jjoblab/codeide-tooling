@@ -186,6 +186,18 @@ internal class SocketClient private constructor(
      * Écrit la prochaine frame en file — priorité santé d'abord (un pong en
      * attente passe devant TOUT événement), sinon la plus ancienne frame
      * normale, en mesurant ce qui doit l'être (Phase 1).
+     *
+     * T-F3 (Phase 2, vidange groupée) : les frames DÉJÀ en file au
+     * réveil de l'écrivain partent ENSEMBLE, en un seul appel système
+     * ([FrameCodec.writeFrames]) — plafonnées en NOMBRE
+     * ([FRAMES_PAR_GROUPE_MAX]) et en OCTETS ([OCTETS_PAR_GROUPE_MAX]).
+     * AUCUNE attente n'est ajoutée pour grossir un groupe (le plafond
+     * temporel « ≤ ~16 ms » du prompt est tenu PAR CONSTRUCTION : ne
+     * jamais retenir une ligne) — on ne groupe que ce qui était déjà
+     * là, la contre-pression du put() reste la sémantique de bout en
+     * bout. Le verdict du 2026-11-08 (transport : 1–2 ms par frame,
+     * réveils par rafale) désignait le nombre d'appels/réveils : les
+     * rafales de sortie de build se payaient frame par frame.
      */
     private fun ecrireProchaineFrame() {
         val framePrioritaire = filePrioritaire.pollFirst()
@@ -193,28 +205,67 @@ internal class SocketClient private constructor(
             FrameSocket.ecrireFrame(sortie, framePrioritaire)
             return
         }
-        val frame = fileNormale.poll(INTERVALLE_MS, TimeUnit.MILLISECONDS) ?: return
-        ecrireEnMesurant(frame)
+        val premiere = fileNormale.poll(INTERVALLE_MS, TimeUnit.MILLISECONDS) ?: return
+        val groupe = grouperFramesDisponibles(premiere)
+        ecrireEnMesurant(groupe)
         // Phase 1 (angle mort n°3) : la profondeur de la file normale nomme
         // le retard d'écriture vers l'app — et désormais son ÂGE aussi
-        // (règle relative/temporelle).
-        avertirSiRetard(frame)
+        // (règle relative/temporelle). La première frame du groupe est la
+        // plus ancienne : c'est ELLE qui porte l'alerte.
+        avertirSiRetard(premiere)
     }
 
     /**
-     * Écrit UNE frame normale en mesurant ce qui doit l'être (Phase 1) :
-     * durée (T2b), appels système (T2b, via [CompteurAppels]) et âge à
-     * l'écriture (T1b — différence entre l'enfilement et maintenant).
+     * Réunit les frames DÉJÀ disponibles derrière [premiere] (jamais une
+     * attente) — bornées en nombre et en octets : le groupe suivant
+     * repartira dès le réveil suivant si la file était plus longue.
      */
-    private fun ecrireEnMesurant(frame: FrameFile) {
+    private fun grouperFramesDisponibles(premiere: FrameFile): List<FrameFile> {
+        val groupe = mutableListOf(premiere)
+        var octets = TAILLE_ENTETE + premiere.octets.size
+        while (groupe.size < FRAMES_PAR_GROUPE_MAX && accueillable(octets, fileNormale.peek())) {
+            // poll() immédiat après peek() : la frame rejointe est bien
+            // celle entrevue (un seul consommateur, l'ordre FIFO tient) —
+            // le `?: break` ne couvre que la race théorique.
+            val suivante = fileNormale.poll() ?: break
+            groupe += suivante
+            octets += TAILLE_ENTETE + suivante.octets.size
+        }
+        return groupe
+    }
+
+    /** La frame entrevue tient-elle dans le budget d'octets du groupe ? */
+    private fun accueillable(
+        octets: Int,
+        suivante: FrameFile?,
+    ): Boolean = suivante != null && octets + TAILLE_ENTETE + suivante.octets.size <= OCTETS_PAR_GROUPE_MAX
+
+    /**
+     * Écrit UN GROUPE de frames normales en mesurant ce qui doit l'être
+     * (Phase 1) : durée (T2b), appels système (T2b, via [CompteurAppels])
+     * et âge à l'écriture (T1b — différence entre l'enfilement et
+     * maintenant, MAXIMUM du groupe). Un groupe d'une frame passe par
+     * [FrameSocket.ecrireFrame] (chemin inchangé), un groupe multiple
+     * par [FrameSocket.ecrireFrames] (T-F3 : un appel système).
+     */
+    private fun ecrireEnMesurant(groupe: List<FrameFile>) {
         val avant = appelsEcriture.get()
         val depart = System.currentTimeMillis()
-        FrameSocket.ecrireFrame(sortie, frame.octets)
+        if (groupe.size == 1) {
+            FrameSocket.ecrireFrame(sortie, groupe[0].octets)
+        } else {
+            FrameSocket.ecrireFrames(sortie, groupe.map { it.octets })
+        }
         val dureeMs = System.currentTimeMillis() - depart
-        InstrumentationTransport.enregistrerEcritureFrame(dureeMs, appelsEcriture.get() - avant)
-        val age = System.currentTimeMillis() - frame.enfileeMs
-        if (age > ageMaxMs.get()) ageMaxMs.updateAndGet { actuel -> maxOf(actuel, age) }
-        InstrumentationTransport.enregistrerAgeFrame(age)
+        InstrumentationTransport.enregistrerEcritureFrame(dureeMs, appelsEcriture.get() - avant, groupe.size)
+        val maintenant = System.currentTimeMillis()
+        var ageMax = 0L
+        for (frame in groupe) {
+            val age = maintenant - frame.enfileeMs
+            if (age > ageMax) ageMax = age
+        }
+        if (ageMax > ageMaxMs.get()) ageMaxMs.updateAndGet { actuel -> maxOf(actuel, ageMax) }
+        InstrumentationTransport.enregistrerAgeFrame(ageMax)
     }
 
     /**
@@ -318,6 +369,22 @@ internal class SocketClient private constructor(
         private const val INTERVALLE_ALERTE_MS = 5_000L
 
         /**
+         * Frames maximales par groupe (T-F3) : 32 lignes de build en un
+         * appel système — au-delà, le groupe suivant repart au réveil
+         * suivant (aucune attente ajoutée).
+         */
+        private const val FRAMES_PAR_GROUPE_MAX = 32
+
+        /**
+         * Octets maximaux par groupe (T-F3) : 256 Kio — bornage mémoire
+         * du tampon de concaténation et fenêtre de réception du pair.
+         */
+        private const val OCTETS_PAR_GROUPE_MAX = 256 * 1024
+
+        /** Taille de l'en-tête de frame (miroir du [FrameCodec]). */
+        private const val TAILLE_ENTETE = 4
+
+        /**
          * Connecte au socket [chemin] dans les [delaiMs] (§3.4 :
          * `CONNECT_TIMEOUT_MS`). Au délai, le canal est fermé — un canal NIO
          * interrompu/fermé débloque le thread de connexion.
@@ -387,6 +454,14 @@ internal object FrameSocket {
         payload: ByteArray,
     ) {
         FrameCodec.writeFrame(sortie, payload)
+    }
+
+    /** Écrit un GROUPE de frames en un appel (T-F3) — délégation au codec. */
+    fun ecrireFrames(
+        sortie: OutputStream,
+        payloads: List<ByteArray>,
+    ) {
+        FrameCodec.writeFrames(sortie, payloads)
     }
 
     fun lireFrame(entree: InputStream): ByteArray = FrameCodec.readFrame(entree)

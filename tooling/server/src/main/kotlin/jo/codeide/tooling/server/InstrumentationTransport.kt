@@ -213,14 +213,19 @@ internal object InstrumentationTransport {
         }
     }
 
-    /** T2b : une frame a été écrite en [dureeMs] avec [appels] appels système. */
+    /**
+     * T2b : [frames] frame(s) écrite(s) en [dureeMs] avec [appels] appels
+     * système — 1 par écriture directe, N par groupe (T-F3, vidange
+     * groupée : le résumé reste honnête sur le nombre de frames EMISES).
+     */
     fun enregistrerEcritureFrame(
         dureeMs: Long,
         appels: Long,
+        frames: Int = 1,
     ) {
         if (!active) return
         synchronized(verrou) {
-            framesEcrites++
+            framesEcrites += frames
             dureeEcritureTotaleMs += dureeMs
             if (dureeMs > dureeEcritureMaxMs) dureeEcritureMaxMs = dureeMs
             appelsEcriture += appels
