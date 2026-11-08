@@ -159,11 +159,17 @@ internal data class SyntheseBuild(
 )
 
 /**
- * Conclusion d'un build extraite du stdout au FIL DE L'EAU (v0.45.2) :
- * l'observateur de [StreamingOutputStream] y écrit DEPUIS UN FIL DE
- * GRADLE pendant que le build tourne, [BuildHandler.publierFin] la lit
- * à la reprise — d'où les atomiques (visibilité inter-fils, même
- * discipline que l'AtomicReference qu'ils remplacent).
+ * Conclusion d'un build extraite du stdout ET du stderr au FIL DE L'EAU
+ * (v0.45.2, T-F8 Phase 2) : l'observateur de [StreamingOutputStream] y
+ * écrit DEPUIS UN FIL DE GRADLE pendant que le build tourne,
+ * [BuildHandler.publierFin] la lit à la reprise — d'où les atomiques
+ * (visibilité inter-fils, même discipline que l'AtomicReference qu'ils
+ * remplacent).
+ *
+ * T-F8 (INC-27) : la durée « BUILD FAILED in Xs » d'un build ÉCHOUÉ
+ * s'imprime sur STDERR — l'accumulateur se nourrit des DEUX flux depuis
+ * la Phase 2 (avant : stdout seul, d'où « gradle=inconnue ms » sur tout
+ * échec, constat appareil du 2026-11-08).
  *
  * @property synthese comptes de tâches de la ligne « N actionable tasks ».
  * @property dureeRapporteeMs durée RAPPORTÉE PAR GRADLE par la ligne
