@@ -1,12 +1,13 @@
 # DIAGNOSTIC-LOGS — retard d'affichage des sorties de build (Phase 1, §3.5)
 
-> **Statut : instrumentation LIVRÉE, verdict EN ATTENTE des mesures
-> appareil.** Ce document est le livrable du STOP « verdict » : il pose la
-> méthode, les bancs, la règle de décision et le protocole d'exécution. La
-> réponse à la question du propriétaire (« le retard vient-il du tooling ou
-> de CodeIDE ? ») sera écrite au §8 dès l'exécution de la matrice §6 sur
-> l'appareil de référence — **aucun chiffre appareil n'est inventé ici**
-> (interdit n°1 du prompt).
+> **Statut : VERDICT RENDU le 2026-11-08 (§8) — le retard était dans
+> le transport du JAR orchestrateur (interblocage JDK 17, corrigé en
+> 1.1.1) ; la Phase 2 des correctifs (T-F) est LIVRÉE en 1.2.0.** Ce
+> document a posé la méthode, les bancs, la règle de décision et le
+> protocole d'exécution ; la réponse à la question du propriétaire
+> (« le retard vient-il du tooling ou de CodeIDE ? ») est écrite au §8,
+> chiffres des trois captures appareil à l'appui — aucune mesure
+> appareil n'y est inventée (interdit n°1 du prompt).
 >
 > Mission : prompt « retard d'affichage des sorties de build » du 2026-10-31
 > (journal de terrain `codeide-logs-2026-10-31-110247.zip`). Branche :
@@ -60,8 +61,8 @@ d'hypothèses du prompt §2.3–§2.5 font foi et ne sont pas répétés ici.
 | T3 | fil `tooling-lecteur` (app) | latence transport (existe) + durées read/décodage/router par frame | existant (min/moy/max) ; le détail par phase reste côté app (branche miroir CodeIDE) |
 | **T3b** | fils serveur | `/proc/self/task/<tid>/schedstat` avant/après build | **livré** (sous drapeau, par TID — le noyau tronque `comm` à 15 caractères, les deux fils du transport y sont indiscernables) |
 | T4 | `GradleService` (app) | latence de publication | existant |
-| T5 | `PanneauConsoleFragment.viderLot` (app) | durée du lot, longueur du texte | **à livrer côté app** (branche miroir) |
-| T6 | `Choreographer` (app) | images perdues, layout/dessin | **à livrer côté app** (branche miroir) |
+| T5 | `PanneauConsoleFragment.viderLot` (app) | durée du lot, longueur du texte | **livré** (ADR 0152) — LU sur appareil : lots 1–7 ms, 0–5 000 car. |
+| T6 | `Choreographer` (app) | images perdues, layout/dessin | **livré** (ADR 0152) — LU sur appareil : ~300 rendues / 5 s, 0–9 perdues, pire interval 17–317 ms en régime, 350–1 683 ms à l'attache |
 | Système | app + orchestrateur | meminfo, onTrimMemory, GC | partiellement existant (F6) ; consolidé côté app |
 
 ### Ligne de conclusion de build corrigée (angle mort n°3)
@@ -202,17 +203,73 @@ la sync (INC-44) et la lecture consolidée des signaux système (meminfo,
 onTrimMemory). **Ces points ne bloquent pas X1–X6** si le propriétaire
 accepte de lancer le banc à la main (adb) ; ils automatisent la séance.
 
-## 8. Verdict (À COMPLÉTER après exécution de §6)
+## 8. Verdict (complété le 2026-11-08 — trois captures appareil, moto g06)
 
-- [ ] X1 (release, repos) : coût par frame = ____ ms → seuil ~50 ms :
-- [ ] X3/X4 reproduisent le profil du journal : oui / non
-- [ ] X6 : T-1→T0 = ____ ; T0→T3 = ____ ; T3→T4 = ____ ; vue = ____
-- [ ] Dépendance à la taille (X9) : O(1) / O(n)
-- [ ] Dépendance au binaire (X2) : ×____
-- **Verdict : tooling / CodeIDE / système / combiné — parts : ______**
+> **Sources** : exports de journaux du propriétaire du 07/11 22:09 (104
+> entrées), 07/11 23:25 (113) et 08/11 01:17 (485) — CodeIDE 0.206.0
+> debug, moto g06, Android 15. Aucun chiffre ci-dessous n'est inventé ;
+> ce que les captures ne contiennent pas est dit NON EXÉCUTÉ.
 
-La réponse à la question du propriétaire s'écrit ici, chiffres à l'appui,
-après la séance appareil. Rien d'autre ne la précède.
+### 8.1 La comparaison décisive (22:09 → 01:17, même appareil, même app)
+
+| Mesure (émission orchestrateur → réception client) | 22:09 — JAR 1.1.0 | 01:17 — JAR 1.1.1 |
+|---|---|---|
+| Sync (77–81 lignes) | moy **12 240 ms**, max 26 001 ms | moy **14 ms**, max 38 ms |
+| Build 23 597 ms (59 lignes) | moy 6 066 ms, max 10 290 ms | — |
+| Build 54 404 ms (66 lignes) | — | moy 24 ms, max 99 ms |
+| 4 builds ~5–8 s (59 lignes) | moy 14 414–22 551 ms, max 22 266–32 504 ms | moy 19–25 ms, max 42–73 ms |
+| Publication (flux → zone texte) | 0–2 ms | 0–1 ms |
+
+Seule variable changée entre les deux captures : **le JAR de
+l'orchestrateur** (1.1.0 → 1.1.1, commit `0e30649` « CanauxBloquants »)
+— l'interblocage `blockingLock()` des flux `Channels` du JDK ≤ 20 tenait
+le fil écrivain en otage du fil lecteur (constat JVM du banc, v1.1.1).
+La capture intermédiaire 23:25 montre l'autre défaut du même JAR
+(`threadId()` JDK 19+ sur toolchain 17 : orchestrateur mort, code 3,
+cinq relances épuisées) — les deux correctifs étaient nécessaires
+ensemble. *Variable de confusion assumée* : l'instrumentation était
+ARMÉE à 01:17 et coupée à 22:09 — son coût mesuré (~1 µs/ligne, §5) ne
+peut pas expliquer une réduction de trois ordres de grandeur.
+
+### 8.2 Cases de la matrice §6
+
+- [x] **X1 (release, repos, coût par frame)** : NON EXÉCUTÉ en banc
+      (`--banc-socket-seul` n'a pas été tiré) — mais la ligne 22:09 y
+      répond PAR SUPÉRIEUR : coût par ligne **6–22 s en moyenne** sur de
+      VRAIS builds, très au-delà du seuil ~50 ms → **défaut de
+      transport** (règle §2, première branche). Confirmé corrigé à 01:17.
+- [ ] X2 (debug vs release) : non exécuté — l'écart binaire reste à
+      mesurer (les deux captures sont en debug).
+- [ ] X3/X4 (contention CPU / mémoire) : non exécutés — devenus
+      secondaires : le retard a disparu sans toucher à la charge.
+      `PressionMemoire` a vu availMem 833–1 292 Mo (niveau 20), sans
+      gc-storm.
+- [x] **X6 (métronome, retard avant T0)** : PARTIEL — premier build de
+      01:17 avec métronome actif : **74 repères, écart T0 min 6 / moy
+      58 / max 141 ms** → H-T7 (retard Gradle→T0) faible sur CE build.
+- [ ] X7 (sync sous instrumentation) : partiel — sync 91–97 s mesurée
+      (phases : MODELE_TACHES 47 s, CONFIGURATION 51 s, DISTRIBUTION
+      89 s) mais pas le scénario « réouverture » — c'est la cible de E1.
+- [x] **X8 (comptage par type)** : OUI — 144–164 publications T1 et
+      147–159 frames par build de 59–66 lignes : TaskStarted=39,
+      ProgressEvent=4–8, BuildOutput=59–66 — **~2,4 frames par ligne
+      affichée** (matière de T-F5, impact résiduel faible post-correctif).
+- [ ] X9 (déluge 10 k/50 k) : non exécuté.
+- [ ] X10 (`--info`) : non exécuté.
+
+### 8.3 Verdict
+
+**Le retard venait du TOOLING — précisément du transport du JAR
+orchestrateur (interblocage des flux du JDK 17), pas de la vue CodeIDE
+et pas du système.** Parts chiffrées sur les captures : transport
+≈ 99,9 % du retard (publication client 0–2 ms, vue 1–7 ms par lot,
+décodage client 2–3 ms par frame, schedstat écrivain +213 ms d'attente
+sur 705 tranches pour 54 s de build). Restes ouverts, par impact :
+la sync de 91–97 s sur projet changé (E1 l'attaque à la racine),
+`gradle=inconnue` sur les builds ÉCHOUÉS (T-F8, livré Phase 2), le pire
+interval d'images à l'attache de la vue (1 683 ms, T6 — vue, ponctuel),
+X2/X9/X10 à exécuter si le doute revient (le banc est réglable depuis
+l'écran de configuration).
 
 ## 9. Historique
 
@@ -226,3 +283,10 @@ après la séance appareil. Rien d'autre ne la précède.
   la branche miroir CodeIDE `mesure/instrumentation-logs` (ADR 0152) porte
   le crochet, T3/T5/T6, INC-44 et les signaux système ; T5/T6 du tableau
   §3 restent à lire sur l'appareil mais l'instrumentation existe désormais.
+- 2026-11-08 (fin de journée) : **verdict §8 rendu** sur les trois captures
+  appareil du propriétaire (22:09 / 23:25 / 01:17) — retard = transport du
+  JAR (interblocage `CanauxBloquants` JDK 17, déjà corrigé en 1.1.1) ;
+  T5/T6 du tableau §3 LUS sur appareil (lots 1–7 ms, images ~300/5 s,
+  0–9 perdues, pire interval 1 683 ms à l'attache). La Phase 2 (T-F)
+  s'ouvre : T-F1/T-F2/T-F3/T-F8 livrés en 1.2.0, le reste arbitré au
+  cas par cas (§8.3).

@@ -1,5 +1,78 @@
 # Changelog — codeide-tooling
 
+## 1.2.0 (2026-11-08)
+
+**Phase 2 — correctifs de transport et cache d'empreinte, sur le verdict
+rendu par les trois captures appareil du propriétaire**
+(`DIAGNOSTIC-LOGS.md` §8 : le retard d'affichage était l'interblocage
+des flux `Channels` du JDK 17 dans le JAR, corrigé en 1.1.1 — latence
+résiduelle mesurée 14–102 ms). Version mineure : des CHAMPS de requête
+additionnels (tolérés par `ignoreUnknownKeys`) et des comportements
+nouveaux côté serveur.
+
+### Verdict et diagnostic
+
+- **`DIAGNOSTIC-LOGS.md` §8 COMPLÉTÉ** — chiffres réels des captures
+  22:09 / 23:25 / 01:17 (moto g06, CodeIDE 0.206.0 debug) : avant/après
+  JAR 1.1.0 → 1.1.1 sur le même appareil, latence moyenne par ligne
+  6 066–22 551 ms → **19–25 ms** ; publication 0–2 ms, vue 1–7 ms par
+  lot, métronome 6–141 ms, schedstat lu sur appareil. Les cases non
+  exécutées (X2/X3/X4/X9/X10) sont dites non exécutées.
+
+### Correctifs de transport (T-F)
+
+- **T-F1 — écriture de frame en UN appel** : `FrameCodec.writeFrame`
+  réunit en-tête + payload dans un tampon unique (1 appel `write`
+  contre 4 + 1) ; **octets du fil inchangés**, verrouillé par test.
+- **T-F3 — vidange groupée de l'écrivain** : `SocketClient` groupe les
+  frames DÉJÀ en file à son réveil (`FrameCodec.writeFrames`, un appel
+  système par groupe), plafonnées à 32 frames / 256 Kio — **aucune
+  attente n'est ajoutée**, une ligne ne retarde jamais ; le résumé
+  d'instrumentation compte les frames réellement émises.
+- **T-F2 (moitié protocole) — lecture d'en-tête en UN appel** : la
+  boucle `read` jusque 4 remplace la lecture octet par octet ;
+  sémantique EOF/troncature inchangée, testée (l'autre moitié — tampon
+  64 Kio côté app — vit dans CodeIDE).
+- **T-F8 — conclusion de build complète (INC-27)** : l'observateur de
+  stderr nourrit AUSSI la conclusion — « BUILD FAILED in Xs » va sur
+  stderr, `gradle=` cesse d'être `inconnue` sur les builds échoués
+  (les sept conclusions de la capture 01:17 étaient des échecs
+  volontaires du propriétaire).
+
+### Cache d'empreinte (plan d'améliorations, écarts E1/E2/E3)
+
+- **E1 — `CacheSyncPersistant`** : le cache de sync SURVIT au
+  redémarrage de l'orchestrateur (fichier JSON par projet à côté du
+  socket, éviction LRU à 8 entrées, écriture atomique). La sync d'un
+  projet DONT RIEN N'A CHANGÉ (empreinte SHA-256 des fichiers Gradle —
+  sous-projets et `buildSrc` compris — + contexte d'exécution :
+  arguments effectifs, version Gradle imposée) se RESTITUE sans Gradle,
+  annoncée par une ligne de console Sync et au journal. `--sync-cache
+  <chemin>` surcharge l'emplacement (déduit par défaut), la chaîne vide
+  le coupe.
+- **E2 — dépendances résolues servies du cache** : la sync extrait
+  l'arbre des dépendances DIRECTES du même modèle IdeaProject (gratuit),
+  `ResolvedDependenciesHandler` répond sans re-résoudre (3,81 s bureau
+  par requête répétée, mesuré dans l'audit) et complète le cache au
+  premier accès hors sync.
+- **E3 — journal de sync serveur** : « sync … conclue : N ms — phases :
+  … » au `Journal`, miroir des lignes INC-44 du client (échec et
+  restitution compris).
+
+### Protocole (compatibles, tolérance de champ)
+
+- **INC-31 — `SyncRequest.argumentsSync`** : arguments Gradle RÉSERVÉS
+  à la synchronisation ; vide = retombe sur `arguments` (comportement
+  inchangé pour un client qui ne sépare pas). Échantillon doré régénéré.
+
+### Documentation
+
+- `docs/ADR-BANC-SERVEUR.md` (E5) : pourquoi le banc « socket seul »
+  vit dans `:tooling:server` (internes de la pile, harnais partagé).
+- `docs/PLAN-AMELIORATIONS.md` : statuts livrés/arbitres mis à jour,
+  table T-F1…T-F10 avec preuves ; T-F6 clos par les chiffres (parseur
+  non dominant), T-F4 reporté (latence sous la cible).
+
 ## 1.1.1 (2026-11-08)
 
 Correctifs du retour d'appareil du 2026-11-07 (CodeIDE 0.206.0, moto g06
