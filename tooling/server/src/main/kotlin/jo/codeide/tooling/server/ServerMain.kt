@@ -52,15 +52,7 @@ public object ServerMain {
         val pool = GradleConnectorPool()
         val bus = EventBusSocket(socket)
         val metronome = genererMetronome(config)
-        val dispatcher =
-            MessageDispatcher(
-                socket,
-                pool,
-                bus,
-                config.intervalleTasMs,
-                genererScriptAppLog(config)?.absolutePath,
-                metronome,
-            )
+        val dispatcher = fabriquerDispatcher(config, socket, pool, bus, metronome)
 
         Runtime.getRuntime().addShutdownHook(
             Thread {
@@ -117,6 +109,44 @@ public object ServerMain {
         if (config.instrumentationTransport) {
             Journal.info("instru: instrumentation transport ACTIVEE (--instru-transport)")
         }
+    }
+
+    /**
+     * Monte le dispatcher de l'orchestrateur (extrait d'[executer] pour la
+     * Phase 2, E1 : la construction gagne le dossier de persistance du
+     * cache de sync sans allonger encore `executer`).
+     */
+    private fun fabriquerDispatcher(
+        config: ServerConfig,
+        socket: SocketClient,
+        pool: GradleConnectorPool,
+        bus: EventBusSocket,
+        metronome: MetronomeBuild?,
+    ): MessageDispatcher =
+        MessageDispatcher(
+            socket,
+            pool,
+            bus,
+            config.intervalleTasMs,
+            genererScriptAppLog(config)?.absolutePath,
+            metronome,
+            dossierCacheSync(config),
+        )
+
+    /**
+     * Dossier de persistance du cache de sync (E1, Phase 2) : explicite
+     * par `--sync-cache` (chaîne VIDE = coupé), sinon DÉDUIT du
+     * répertoire du socket — `sync-cache/` à côté de lui, dans le
+     * répertoire privé de l'app (sémantique de cache : le système peut
+     * le vider, l'empreinte revalide tout). Un socket sans répertoire
+     * parent coupe la persistance (cache mémoire seul).
+     */
+    private fun dossierCacheSync(config: ServerConfig): java.io.File? {
+        config.dossierCacheSync?.let { explicite ->
+            return explicite.ifEmpty { null }?.let { chemin -> java.io.File(chemin) }
+        }
+        val parent = java.io.File(config.cheminSocket).parentFile ?: return null
+        return java.io.File(parent, "sync-cache")
     }
 
     /**

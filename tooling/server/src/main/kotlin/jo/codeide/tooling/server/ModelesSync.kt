@@ -1,5 +1,6 @@
 package jo.codeide.tooling.server
 
+import jo.codeide.tooling.protocol.ResolvedDependencyNode
 import org.gradle.tooling.BuildAction
 import org.gradle.tooling.BuildController
 import org.gradle.tooling.ProjectConnection
@@ -99,10 +100,17 @@ internal data class ResultatActionModeles(
 /**
  * Résultat ORCHESTRATEUR complet (tâches + modules fusionnés) — déposé
  * dans le [CacheSync] par la sync.
+ *
+ * E2 (Phase 2) : [dependances] porte l'arbre des dépendances DIRECTES de
+ * chaque module JVM pur, extrait du MÊME modèle IdeaProject que les
+ * classpaths — le [ResolvedDependenciesHandler] répondra depuis le
+ * cache d'empreinte sans re-résoudre (3,81 s bureau par requête répétée,
+ * mesuré dans l'audit).
  */
 internal data class ResultatModelesSync(
     val taches: List<TacheDto>,
     val modules: List<ModuleClasspathDto>,
+    val dependances: Map<String, List<ResolvedDependencyNode>> = emptyMap(),
 )
 
 /**

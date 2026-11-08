@@ -352,6 +352,15 @@ public data class SyncRequest(
     public val gradleVersion: String? = null,
     /** Arguments Gradle de la sync (réglages tooling de l'utilisateur). */
     public val arguments: List<String> = emptyList(),
+    /**
+     * Arguments Gradle RÉSERVÉS à la synchronisation (INC-31, Phase 2) :
+     * une liste VIDE retombe sur [arguments] — le comportement des
+     * clients qui ne séparent pas reste IDENTIQUE. Champ additionnel
+     * toléré par `ignoreUnknownKeys` : un ancien orchestrateur
+     * l'ignore (le fil en porte un de plus, vide) ; les échantillons
+     * dorés le figent.
+     */
+    public val argumentsSync: List<String> = emptyList(),
 ) : ToolingRequest
 
 /**

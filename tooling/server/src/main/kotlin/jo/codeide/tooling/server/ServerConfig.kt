@@ -37,6 +37,13 @@ internal data class ServerConfig(
     val depotAppLog: String? = null,
     val instrumentationTransport: Boolean = false,
     val banc: ParametresBanc? = null,
+    /**
+     * Dossier de persistance du cache de sync (E1, Phase 2). `null` : le
+     * dossier se déduit du répertoire du socket (`sync-cache/` à côté de
+     * lui — répertoire privé de l'app, sémantique de cache) ; la chaîne
+     * VIDE coupe la persistance (cache mémoire seul).
+     */
+    val dossierCacheSync: String? = null,
 ) {
     /** Niveaux de journalisation de l'orchestrateur. */
     enum class NiveauJournal {
@@ -94,6 +101,7 @@ internal data class ServerConfig(
             "usage : --socket <chemin> --secret <secret> " +
                 "[--log-level INFO|WARN|ERROR] [--heap-intervalle-ms <n>] " +
                 "[--applog-repo <chemin>] [--instru-transport] " +
+                "[--sync-cache <chemin|vide>] " +
                 "[--banc-socket-seul [--banc-lignes <n>] [--banc-cadence-ms <n>] " +
                 "[--banc-longueur-ligne <n>] [--banc-contenu plain|ansi|utf8|multi]]"
 
@@ -124,6 +132,7 @@ internal data class ServerConfig(
             var bancCadenceMs = BANC_CADENCE_MS_DEFAUT
             var bancLongueurLigne = BANC_LONGUEUR_LIGNE_DEFAUT
             var bancContenu = ContenuLigneBanc.PLAIN
+            var dossierCacheSync: String? = null
 
             var i = 0
             while (i < args.size) {
@@ -169,6 +178,11 @@ internal data class ServerConfig(
                     "--instru-transport" -> {
                         instrumentationTransport = true
                         i += 1
+                    }
+
+                    "--sync-cache" -> {
+                        dossierCacheSync = valeur(args, i)
+                        i += 2
                     }
 
                     "--banc-socket-seul" -> {
@@ -229,6 +243,7 @@ internal data class ServerConfig(
                 intervalleTasMs = intervalleTas,
                 depotAppLog = depotAppLog,
                 instrumentationTransport = instrumentationTransport,
+                dossierCacheSync = dossierCacheSync,
                 banc =
                     if (bancArme) {
                         ParametresBanc(bancLignes, bancCadenceMs, bancLongueurLigne, bancContenu)

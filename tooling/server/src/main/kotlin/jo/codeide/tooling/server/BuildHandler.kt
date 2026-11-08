@@ -103,6 +103,11 @@ internal class BuildHandler(
         // l'eau (synthèse « N actionable tasks » + durée RAPPORTÉE PAR
         // GRADLE « in Xs », v0.45.2) — lue à la fin pour remplir
         // [BuildFinished] et la décomposition honnête des durées.
+        // T-F8 (Phase 2, INC-27) : « BUILD FAILED in Xs » va sur STDERR —
+        // l'accumulateur se nourrit désormais des DEUX flux, la durée
+        // Gradle d'un build ÉCHOUÉ cesse d'être « inconnue » (constat
+        // appareil 2026-11-08 : sept conclusions, sept « gradle=inconnue
+        // ms » sur des échecs volontaires).
         val conclusion = ConclusionStdout()
         try {
             val connexion = connecter(requete)
@@ -307,7 +312,13 @@ internal class BuildHandler(
                     requete.buildId,
                     StreamKind.STDERR,
                     bus,
-                    observateur = publications::diagnostic,
+                    // T-F8 : stderr porte la conclusion des builds ÉCHOUÉS
+                    // (« BUILD FAILED in Xs ») ET les diagnostics — les deux
+                    // observateurs s'y branchent, chacun pour son rôle.
+                    observateur = { ligne ->
+                        publications.diagnostic(ligne)
+                        conclusion.enregistrer(ligne)
+                    },
                 ),
             ).addProgressListener(ProgressBridge(requete.buildId, bus), OperationType.TASK)
             // v4 (§6) : téléchargements + configuration du build.

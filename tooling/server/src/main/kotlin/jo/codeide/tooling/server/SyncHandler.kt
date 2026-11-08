@@ -60,20 +60,42 @@ import java.io.File
  * PROJECT_CONFIGURATION, débit borné) et l'écouteur HISTORIQUE de statut
  * (descriptions textuelles de la distribution/du daemon — l'unique
  * signal TAPI pendant la résolution de la distribution).
+ *
+ * Exemption detekt ciblée (règle 16) : TooManyFunctions — chaque fonction
+ * est une PIÈCE du cycle de sync (synchroniser, restituer, conclure,
+ * exécuter, sonder, mesurer) ; les découper en classes artificielles
+ * casserait le dialogue phases/résultat qu'elles partagent (même
+ * justification que [BuildHandler]).
  */
+@Suppress("TooManyFunctions")
 internal class SyncHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
-    private val cache: CacheSync = CacheSync(),
+    private val cache: CacheSyncPersistant = CacheSyncPersistant(null),
 ) {
     /**
      * Résout les modèles du projet et publie [SyncStarted], les phases
      * réelles puis [SyncResult] ou [PartialSyncResult].
+     *
+     * E1 (Phase 2) : l'empreinte des fichiers Gradle se calcule DANS la
+     * phase OUTILS — quand elle correspond au dernier dépôt (mémoire ou
+     * disque, [CacheSyncPersistant.restituer]) et que le contexte
+     * d'exécution n'a pas changé, la sync se RESTITUE : pas de Gradle,
+     * pas de daemon, une ligne honnête dans la console Sync et le
+     * [Journal] (E3). Le cas « réouverture d'un projet inchangé » cesse
+     * de re-payer 91–194 s.
+     *
+     * Exemption detekt ciblée (règle 16) : ReturnCount — clauses de garde
+     * typées (restitution E1, connexion impossible, action échouée —
+     * chacune publie sa conclusion avant de sortir) ; même exemption que
+     * le `boucleDeVie` du daemon.
      */
+    @Suppress("ReturnCount")
     suspend fun synchroniser(requete: SyncRequest) {
         val debut = System.currentTimeMillis()
         val dossier = File(requete.projectDir)
         val phases = ConteurPhasesSync(requete.projectDir, bus)
+        val argumentsEffectifs = argumentsEffectifs(requete)
 
         // Départ annoncé AVANT toute résolution (étape 32, ADR 0057) :
         // symétrique du BuildStarted des builds — l'app rend son état sur
@@ -87,13 +109,24 @@ internal class SyncHandler(
         )
 
         // ---- OUTILS : vérifications locales (rapides, sans requête) -----
-        val urlWrapper =
+        // E1 : la phase couvre désormais AUSSI le calcul d'empreinte (la
+        // lecture des fichiers Gradle du projet) — c'est le prix de la
+        // restitution, payé à chaque sync, compté pour ce qu'il est.
+        val (empreinte, urlWrapper) =
             mesurerLocale(phases) {
                 if (!dossier.isDirectory) {
                     error("répertoire introuvable : ${requete.projectDir}")
                 }
-                EtatsDistribution.lireUrlWrapper(dossier)
+                EmpreinteProjet.calculer(dossier) to EtatsDistribution.lireUrlWrapper(dossier)
             }
+
+        // ---- E1 : restitution du cache d'empreinte (rien n'a changé) ---
+        val contexte = contexteExecution(requete, argumentsEffectifs)
+        val restituee = cache.restituer(requete.projectDir, empreinte, contexte)
+        if (restituee != null) {
+            restituerDuCache(requete, phases, restituee, debut)
+            return
+        }
 
         // ---- Connexion (sans phase : connect() ne télécharge rien —
         // v4 corrige le mensonge de l'ancienne phase CONNEXION). ----------
@@ -127,7 +160,7 @@ internal class SyncHandler(
                 coroutineScope {
                     val sondeur = lancerSondeurDistribution(phases, urlWrapper)
                     try {
-                        executerAction(requete, phases, connexion)
+                        executerAction(requete, phases, connexion, argumentsEffectifs)
                     } finally {
                         sondeur.cancel()
                     }
@@ -141,7 +174,7 @@ internal class SyncHandler(
 
         // ---- Conclusion : classpaths puis résultat (§3.2 — « Synchronisé »
         // n'apparaît qu'après la dernière phase). -------------------------
-        conclureAvecSucces(requete, phases, resultat, debut)
+        conclureAvecSucces(requete, phases, resultat, debut, empreinte, contexte)
     }
 
     /** Sortie d'échec sec — les phases pendantes sont closes par l'appelant. */
@@ -150,6 +183,11 @@ internal class SyncHandler(
         debut: Long,
         message: String,
     ) {
+        // E3 (Phase 2) : journal de sync serveur — miroir des lignes
+        // INC-44 du client, l'export se lit des deux côtés du socket.
+        Journal.warn(
+            "sync ${File(requete.projectDir).name} échouée : ${System.currentTimeMillis() - debut} ms — $message",
+        )
         bus.publier(
             SyncResult(
                 id = requete.id,
@@ -162,6 +200,59 @@ internal class SyncHandler(
         )
     }
 
+    /**
+     * Restitution E1 : la sync se conclut SANS Gradle — phases annoncées
+     * pour ce qu'elles sont (OUTILS a eu lieu : c'est elle qui a calculé
+     * l'empreinte), CLASSPATHS servi du dépôt, une ligne honnête dans la
+     * console Sync (même discipline que la ligne « état sync restitué »
+     * du client, INC-05) et au [Journal] (E3).
+     */
+    private fun restituerDuCache(
+        requete: SyncRequest,
+        phases: ConteurPhasesSync,
+        restituee: CacheSync.Entree,
+        debut: Long,
+    ) {
+        bus.publier(
+            ligneConsoleSync(
+                requete.projectDir,
+                "Synchronisation restituée du cache serveur — fichiers Gradle inchangés",
+            ),
+        )
+        phases.ouvrir(SyncPhase.CLASSPATHS)
+        phases.conclure(SyncPhase.CLASSPATHS, compteur = restituee.modules.size)
+        phases.conclureTout()
+        val dureeMs = System.currentTimeMillis() - debut
+        Journal.info(
+            "sync ${File(requete.projectDir).name} conclue (restituée du cache d'empreinte) : " +
+                "$dureeMs ms — phases : ${phases.resumePhases()}",
+        )
+        bus.publier(
+            SyncResult(
+                id = requete.id,
+                protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+                projectDir = requete.projectDir,
+                succeeded = true,
+                durationMs = dureeMs,
+                taches = restituee.taches,
+            ),
+        )
+    }
+
+    /** Ligne de console Sync (ADR 0079) — le canal honnête de la restitution. */
+    private fun ligneConsoleSync(
+        projectDir: String,
+        texte: String,
+    ): jo.codeide.tooling.protocol.SyncOutput =
+        jo.codeide.tooling.protocol.SyncOutput(
+            id = nouvelId(),
+            protocolVersion = GradleProtocol.PROTOCOL_VERSION,
+            projectDir = projectDir,
+            stream = StreamKind.STDOUT,
+            line = texte,
+            timestampMs = System.currentTimeMillis(),
+        )
+
     /** Conclusion : CLASSPATHS avant le résultat, cache déposé, phases
      *  pendantes closes — « Synchronisé » n'apparaît qu'après la dernière
      *  phase (§3.2).
@@ -171,28 +262,49 @@ internal class SyncHandler(
      *  sans second aller-retour de listage (retour utilisateur : « une
      *  fois la sync terminée, le bouton devrait être immédiatement
      *  activé » — l'aller-retour `TasksRequest` qui suivait laissait le
-     *  bouton inerte le temps d'un IPC même servi par le cache). */
+     *  bouton inerte le temps d'un IPC même servi par le cache).
+     *
+     *  E1/E2 (Phase 2) : le dépôt porte l'empreinte, le contexte
+     *  d'exécution et les dépendances directes — la prochaine sync d'un
+     *  projet inchangé se restituera, les arbres de dépendances se
+     *  serviront du cache. E3 : conclusion journalisée côté serveur.
+     *
+     *  Exemption detekt ciblée (règle 16) : LongParameterList — boîte de
+     *  conclusion d'une sync (requête, phases, résultat, horloge, clé de
+     *  fraîcheur E1) : les champs arrivent ENSEMBLE du `synchroniser`, les
+     *  regrouper en une classe « ConclusionSync » déplacerait le problème
+     *  sans le réduire (même justification que `publierFin` du build). */
+    @Suppress("LongParameterList")
     private fun conclureAvecSucces(
         requete: SyncRequest,
         phases: ConteurPhasesSync,
         resultat: ResultatModelesSync,
         debut: Long,
+        empreinte: String,
+        contexte: String,
     ) {
         phases.ouvrir(SyncPhase.CLASSPATHS)
         phases.conclure(SyncPhase.CLASSPATHS, compteur = resultat.modules.size)
 
         // Le cache alimente listage et classpath (v4) : une seule
-        // résolution, tout le monde en profite.
-        cache.deposer(requete.projectDir, resultat.taches, resultat.modules)
+        // résolution, tout le monde en profite — et survit au
+        // redémarrage depuis E1.
+        cache.deposer(requete.projectDir, empreinte, contexte, resultat)
 
         phases.conclureTout()
+        val dureeMs = System.currentTimeMillis() - debut
+        // E3 (Phase 2) : journal de sync serveur, miroir des lignes INC-44
+        // du client — la séance X7 se lira des deux côtés du socket.
+        Journal.info(
+            "sync ${File(requete.projectDir).name} conclue : $dureeMs ms — phases : ${phases.resumePhases()}",
+        )
         bus.publier(
             SyncResult(
                 id = requete.id,
                 protocolVersion = GradleProtocol.PROTOCOL_VERSION,
                 projectDir = requete.projectDir,
                 succeeded = true,
-                durationMs = System.currentTimeMillis() - debut,
+                durationMs = dureeMs,
                 taches =
                     resultat.taches.map { dto ->
                         TaskInfo(path = dto.path, group = dto.group, displayName = dto.displayName)
@@ -200,6 +312,26 @@ internal class SyncHandler(
             ),
         )
     }
+
+    /**
+     * Arguments effectifs de la sync (INC-31, Phase 2) : les arguments
+     * RÉSERVÉS à la sync quand le client en fournit, sinon les arguments
+     * généraux — le comportement d'un client qui ne sépare pas est
+     * rigoureusement celui d'avant.
+     */
+    private fun argumentsEffectifs(requete: SyncRequest): List<String> =
+        requete.argumentsSync.ifEmpty { requete.arguments }
+
+    /**
+     * Contexte d'exécution de la sync (E1) : ce qui, SANS toucher aux
+     * fichiers Gradle, change le résultat de la résolution — arguments
+     * effectifs et version Gradle imposée. Haché simplement (une chaîne
+     * stable suffit : c'est une clé d'égalité, pas un secret).
+     */
+    private fun contexteExecution(
+        requete: SyncRequest,
+        argumentsEffectifs: List<String>,
+    ): String = "gradle=${requete.gradleVersion ?: "wrapper"};args=${argumentsEffectifs.joinToString(" ")}"
 
     /**
      * Exécute l'action unique : arguments réglés, écouteurs communs
@@ -210,6 +342,7 @@ internal class SyncHandler(
         requete: SyncRequest,
         phases: ConteurPhasesSync,
         connexion: org.gradle.tooling.ProjectConnection,
+        argumentsEffectifs: List<String>,
     ): ResultatModelesSync {
         val daemonConclu =
             java.util.concurrent.atomic
@@ -232,7 +365,7 @@ internal class SyncHandler(
             val executer =
                 connexion
                     .action(ActionSyncModeles())
-                    .withArguments(requete.arguments + CONSOLE_TEXTE)
+                    .withArguments(argumentsEffectifs + CONSOLE_TEXTE)
                     .addProgressListener(
                         ecouteur,
                         OperationType.FILE_DOWNLOAD,
@@ -280,31 +413,43 @@ internal class SyncHandler(
             executer.setStandardError(StreamingFluxSync(requete.projectDir, StreamKind.STDERR, bus))
             val resultatAction = executer.run()
 
-            // v8 (ADR 0113) : IdeaProject — modules JVM purs — par le
-            // MODEL BUILDER APRÈS l'action (les dépendances typées
-            // IdeaModuleDependency/IdeaSingleEntryLibraryDependency
-            // n'existent pas dans une action : l'adaptateur côté démon ne
-            // proxifie que l'interface de base — cf. ModelesSync). Le
-            // démon est déjà configuré, l'aller est peu coûteux ; la phase
-            // MODELE_IDE (ouverte par le marqueur de l'action) couvre
-            // aussi cette résolution. Mêmes arguments et mêmes écouteurs.
-            val modulesIdea =
-                connexion
-                    .model(IdeaProject::class.java)
-                    .withArguments(requete.arguments + CONSOLE_TEXTE)
-                    .addProgressListener(
-                        ecouteur,
-                        OperationType.FILE_DOWNLOAD,
-                        OperationType.PROJECT_CONFIGURATION,
-                    ).addProgressListener(ecouteurStatut)
-                    .get()
-                    .versModulesDto()
+            // E2 (Phase 2) : le MÊME modèle idea porte l'arbre des
+            // dépendances directes — extrait ici, gratuit, déposé avec la
+            // sync (voir [resoudreModelesIdea]).
+            val idea = resoudreModelesIdea(connexion, argumentsEffectifs, ecouteur, ecouteurStatut)
             ResultatModelesSync(
                 taches = resultatAction.taches,
-                modules = fusionner(modulesIdea, resultatAction.modulesAndroid),
+                modules = fusionner(idea.versModulesDto(), resultatAction.modulesAndroid),
+                dependances = idea.versDependances(),
             )
         }
     }
+
+    /**
+     * Modèle IdeaProject par le MODEL BUILDER APRÈS l'action (v8,
+     * ADR 0113 : les dépendances typées n'existent pas DANS une action,
+     * l'adaptateur côté démon ne proxifie que l'interface de base — cf.
+     * [ModelesSync]). Le démon est déjà configuré, l'aller est peu
+     * coûteux ; la phase MODELE_IDE (ouverte par le marqueur de l'action)
+     * couvre aussi cette résolution. Extraite d'`executerAction` (E2,
+     * Phase 2) : l'action redevient lisible, la résolution gardant SES
+     * écouteurs et SES arguments.
+     */
+    private fun resoudreModelesIdea(
+        connexion: org.gradle.tooling.ProjectConnection,
+        argumentsEffectifs: List<String>,
+        ecouteur: EcouteurProgressionCommun,
+        ecouteurStatut: EcouteurStatutLegacy,
+    ): org.gradle.tooling.model.idea.IdeaProject =
+        connexion
+            .model(org.gradle.tooling.model.idea.IdeaProject::class.java)
+            .withArguments(argumentsEffectifs + CONSOLE_TEXTE)
+            .addProgressListener(
+                ecouteur,
+                OperationType.FILE_DOWNLOAD,
+                OperationType.PROJECT_CONFIGURATION,
+            ).addProgressListener(ecouteurStatut)
+            .get()
 
     /**
      * Sondeur de la distribution pendant l'action (500 ms) : octets reçus

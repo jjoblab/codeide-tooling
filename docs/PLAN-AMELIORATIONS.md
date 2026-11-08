@@ -1,14 +1,13 @@
 # PLAN-AMELIORATIONS — tooling « niveau Android Studio » (Phase 3, §5.4)
 
-> **Statut : plan complet d'arbitrage du propriétaire.** Étendu par la
-> Phase 3 (audit `AUDIT-PERFORMANCE.md`, référence
-> `REFERENCE-ANDROID-STUDIO.md`). Le volet A reste **STOPPÉ au verdict**
-> (`DIAGNOSTIC-LOGS.md` §8 : les mesures appareil restent à exécuter par
-> le propriétaire) — les correctifs de transport (T-F1 à T-F10) ne
-> s'appliqueront qu'APRÈS ce verdict, dans l'ordre de la preuve. Les
-> fonctions marquées **[ARBITRAGE]** ne s'implémentent pas sans accord
-> (interdit n°5) ; les chantiers marqués **[APRÈS VERDICT]** attendent les
-> chiffres de la matrice X1–X10.
+> **Statut : mise à jour du 2026-11-08 (session Phase 2).** Le verdict
+> du volet A est RENDU (`DIAGNOSTIC-LOGS.md` §8 : retard = transport du
+> JAR, corrigé en 1.1.1) — la Phase 2 s'est ouverte sur SES chiffres :
+> **T-F1/T-F2/T-F3/T-F8 livrés en 1.2.0**, E1/E2/E3 livrés, INC-31
+> livré (protocole + serveur + écran de configuration CodeIDE). Les
+> fonctions marquées **[ARBITRAGE]** restent soumises au propriétaire
+> (interdit n°5) ; les chantiers marqués **[APRÈS VERDICT]** sont
+> débloqués au cas par cas selon §8.3.
 
 ## 1. Annulation de la synchronisation (INC-12 — [ARBITRAGE], risque abaissé)
 
@@ -63,15 +62,15 @@ Issus de `AUDIT-PERFORMANCE.md` — tri décroissant du rapport impact/effort :
 
 | # | Écart | Impact attendu | Effort | Risque | Dépend de |
 |---|---|---|---|---|---|
-| E1 | **Empreinte serveur persistée** : `CacheSync` survit au redémarrage de l'orchestrateur (clé = SHA-256 des fichiers Gradle, miroir du `sync-state.json` client) ; la revalidation silencieuse devient un no-op quand rien n'a changé | **ÉLEVÉ** — supprime la quasi-totalité des 194 s dans le cas « rien n'a changé » (réouverture) | 2-3 j-h | FAIBLE (cache pur, invalider à la sync) | rien — [APRÈS VERDICT X7] pour mesurer le gain réel appareil |
-| E2 | **`ResolvedDependenciesHandler` depuis le cache d'empreinte** : répondre sans re-résoudre quand l'empreinte n'a pas changé | MOYEN — 3,81 s bureau par requête répétée | 1 j-h | FAIBLE | E1 (même mécanisme) |
-| E3 | **Journal de sync serveur** (T-F9 partiel) : « sync … conclu : N ms » + phases au `Journal` serveur, miroir des lignes client INC-44 | MOYEN — parité de diagnostic serveur/client, la séance X7 se lit des deux côtés | 0,5 j-h | FAIBLE | rien |
-| E4 | **Seuils kover sur ce dépôt** (4 modules) | MOYEN — garde-fou de régression de couverture, parité avec CodeIDE | 0,5 j-h | FAIBLE | rien |
-| E5 | **ADR du banc dans `:tooling:server`** (accès aux internes, partagé avec `ServeurIntegrationTest`) | FAIBLE — dette documentaire | 0,25 j-h | FAIBLE | rien |
-| E6 | **Filtres de console** (avertissements / tâches réussies) côté CodeIDE | MOYEN — parité fenêtre Build (fiche 1) | 1 j-h | FAIBLE | volet vue, [APRÈS VERDICT] |
+| E1 | **Empreinte serveur persistée** : `CacheSync` survit au redémarrage de l'orchestrateur (clé = SHA-256 des fichiers Gradle + contexte d'exécution, miroir élargi du `sync-state.json` client) ; la revalidation silencieuse devient un no-op quand rien n'a changé | **ÉLEVÉ** — supprime la quasi-totalité des 194 s dans le cas « rien n'a changé » (réouverture) | 2-3 j-h | FAIBLE (cache pur, invalider à la sync) | **LIVRÉ en 1.2.0** (`EmpreinteProjet` + `CacheSyncPersistant`, restitution annoncée en console et au journal) |
+| E2 | **`ResolvedDependenciesHandler` depuis le cache d'empreinte** : répondre sans re-résoudre quand l'empreinte n'a pas changé | MOYEN — 3,81 s bureau par requête répétée | 1 j-h | FAIBLE | **LIVRÉ en 1.2.0** (arbres extraits au fil de la sync, complétés au premier accès hors sync) |
+| E3 | **Journal de sync serveur** (T-F9 partiel) : « sync … conclu : N ms » + phases au `Journal` serveur, miroir des lignes client INC-44 | MOYEN — parité de diagnostic serveur/client, la séance X7 se lit des deux côtés | 0,5 j-h | FAIBLE | **LIVRÉ en 1.2.0** (conclusion + résumé de phases, restitution incluse) |
+| E4 | **Seuils kover sur ce dépôt** (4 modules) | MOYEN — garde-fou de régression de couverture, parité avec CodeIDE | 0,5 j-h | FAIBLE | à livrer (le seuil serveur 75 % existe, les 3 autres modules restent) |
+| E5 | **ADR du banc dans `:tooling:server`** (accès aux internes, partagé avec `ServeurIntegrationTest`) | FAIBLE — dette documentaire | 0,25 j-h | FAIBLE | **LIVRÉ en 1.2.0** (`docs/ADR-BANC-SERVEUR.md`) |
+| E6 | **Filtres de console** (avertissements / tâches réussies) côté CodeIDE | MOYEN — parité fenêtre Build (fiche 1) | 1 j-h | FAIBLE | volet vue — à arbitrer (le verdict a clos le retard, la parité reste un confort) |
 | E7 | **Liens fichier:ligne cliquables dans la console** | MOYEN — erreurs cliquables (fiche 1) | 2-3 j-h | MOYEN | virtualisation de la console (T-F volet client) |
-| E8 | **Écran « Analyseur de build » minimal** (top tâches, phases, téléchargements) | MOYEN — parité Build Analyzer (fiche 3), assemblage d'états déjà transportés | 2-3 j-h | FAIBLE | verdict (pour savoir si les tâches dominent sur appareil) |
-| E9 | **Options Gradle** : `--parallel`, build cache, étude configuration cache (T-F10) | À MESURER (le gain dépend du projet) | 0,5 j-h par option, mesure comprise | MOYEN (changements de comportement build) | [APRÈS VERDICT] — mesure avant/après obligatoire |
+| E8 | **Écran « Analyseur de build » minimal** (top tâches, phases, téléchargements) | MOYEN — parité Build Analyzer (fiche 3), assemblage d'états déjà transportés | 2-3 j-h | FAIBLE | [ARBITRAGE] — à arbitrer (X8 a chiffré la matière : 39 TaskStarted par build ignorés aujourd'hui) |
+| E9 | **Options Gradle** : `--parallel`, build cache, étude configuration cache (T-F10) | À MESURER (le gain dépend du projet) | 0,5 j-h par option, mesure comprise | MOYEN (changements de comportement build) | [APRÈS MESURE] — mesure avant/après obligatoire (X10 non exécuté) |
 
 ## 4. Vagues proposées (courtes, réversibles, critères de sortie mesurables)
 
@@ -107,15 +106,28 @@ Issus de `AUDIT-PERFORMANCE.md` — tri décroissant du rapport impact/effort :
   INC-31/32/33, T-F4 protocole batch) et la validation de chaque critère
   de sortie.
 
-## 6. Correctifs de transport (rappel — APRÈS le verdict du volet A)
+## 6. Correctifs de transport (Phase 2 — verdict rendu, ordre fixé par §8)
 
-T-F1 à T-F10 du prompt §4 (écriture groupée, lecture tamponnée,
-lotissement négocié `BuildOutputBatch`, réduction de production,
-parseur hors fil, allocations, conclusion complète stdout+stderr —
-INC-27/T-F8, instrumentation permanente et sobre, réglages Gradle) :
-l'ORDRE sera fixé par les chiffres de la matrice X1–X10, chaque
-correctif livré avec mesure avant/après sur les mêmes bancs, mêmes
-appareil et binaire (règle 9 : release ET debug, écart rapporté).
+Verdict du 2026-11-08 (`DIAGNOSTIC-LOGS.md` §8) : le retard était le
+transport du JAR (interblocage JDK 17, corrigé en 1.1.1) ; la latence
+résiduelle appareil est de 14–102 ms selon les flux. État après 1.2.0 :
+
+| Correctif | État | Preuve / justification |
+|---|---|---|
+| T-F1 écriture de frame en un appel | **LIVRÉ** | `FrameCodec.writeFrame` réunit en-tête+payload (1 appel `write`, contre 4+1) ; `FrameCodecTest` verrouille octets inchangés et appel unique |
+| T-F2 lecture tamponnée côté client | **LIVRÉ (protocole + app)** | en-tête lu en UN `read` bouclé (sémantique EOF/troncature inchangée, testée) ; l'app enveloppe le canal d'un `BufferedInputStream` 64 Kio — octets du fil inchangés |
+| T-F3 vidange groupée du consommateur | **LIVRÉ** | l'écrivain du `SocketClient` groupe les frames DÉJÀ en file (plafonds 32 frames / 256 Kio, AUCUNE attente ajoutée) — `writeFrames` en un appel système |
+| T-F4 lotissement négocié `BuildOutputBatch` | **REPORTÉ [ARBITRAGE]** | la latence p95 appareil (42–102 ms max) est sous la cible proposée (< 250 ms) : le bénéfice marginal ne justifie pas un changement de fil négocié aujourd'hui |
+| T-F5 ne plus produire ce qui n'est pas affiché | **CHIFFRÉ, PAS IMPLÉMENTÉ** | X8 : ~2,4 frames par ligne affichée (39 TaskStarted par build) — à ~1–2 ms/frame post-correctif, l'impact résiduel est ~100 ms par build ; à revisiter AVEC E8 (l'analyseur consommerait ces événements) |
+| T-F6 parseur de diagnostics hors fil de pompage | **NON NECESSAIRE (chiffres)** | T2 appareil : BuildOutput moy 1–2 ms, max 28 ms — le parseur ne domine aucun profil post-verdict ; à rouvrir si X9 (déluge) le montre |
+| T-F7 allocations par ligne | **PARTIEL** | le tampon de groupe est réutilisé par écriture ; l'encodage JSON par événement reste (mesuré non dominant) ; UUID par ligne : les identifiants du protocole sont inchangés par contrat (règle 2) |
+| T-F8 conclusion complète stdout+stderr | **LIVRÉ** | l'observateur stderr nourrit la conclusion : `gradle=` renseigné sur les builds ÉCHOUÉS (INC-27 clos ; les 7 conclusions « inconnue » de la capture 01:17 étaient toutes des échecs volontaires) |
+| T-F9 instrumentation permanente et sobre | **LIVRÉ (volet sync)** | journal de sync serveur E3 (conclusion + phases + restitution) ; le build avait déjà sa ligne ; la sonde reste sous drapeau (règle 10) |
+| T-F10 réglages Gradle | **DOCUMENTÉ [APRÈS MESURE]** | E9 : chaque option exige une mesure avant/après sur appareil (X10 non exécuté) ; les arguments libres (dont `--parallel`) restent passables par l'écran de configuration |
+
+Règle maintenue : tout nouveau correctif se livre avec mesure avant/après
+sur les mêmes bancs, mêmes appareil et binaire (règle 9 : release ET
+debug, écart rapporté).
 
 ## 7. Historique
 
@@ -125,3 +137,8 @@ appareil et binaire (règle 9 : release ET debug, écart rapporté).
   Tooling API), écarts E1–E9 issus de l'audit (empreinte serveur, cache
   des dépendances, journal de sync serveur, kover, parité console),
   vagues 0–3 avec critères de sortie, séparation des responsabilités.
+- 2026-11-08 (session Phase 2) : verdict rendu (DIAGNOSTIC-LOGS §8) ;
+  E1/E2/E3/E5 et T-F1/T-F2/T-F3/T-F8 **livrés en 1.2.0** ; INC-31 livré
+  (champ `argumentsSync` négocié par tolérance de champ, séparé dans
+  l'écran de configuration CodeIDE) ; T-F4/T-F5/E8 arbitres ouverts,
+  T-F6 clos par les chiffres.

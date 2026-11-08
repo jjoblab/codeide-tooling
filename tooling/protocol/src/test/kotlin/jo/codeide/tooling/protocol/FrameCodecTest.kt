@@ -134,4 +134,151 @@ class FrameCodecTest {
             FrameCodec.readFrame(ByteArrayInputStream(ByteArray(0)))
         }
     }
+
+    // ---- T-F1 (Phase 2) : écriture de frame en UN appel -----------------
+
+    /** Compteur d'appels `write` — prouve le regroupement, pas juste l'octet. */
+    private class FluxCompteur : java.io.OutputStream() {
+        var appels = 0
+        val octets = mutableListOf<Byte>()
+
+        override fun write(octet: Int) {
+            appels++
+            octets += octet.toByte()
+        }
+
+        override fun write(
+            octets: ByteArray,
+            depart: Int,
+            longueur: Int,
+        ) {
+            appels++
+            for (i in depart until depart + longueur) {
+                this.octets += octets[i]
+            }
+        }
+
+        fun tableau(): ByteArray = octets.toByteArray()
+    }
+
+    @Test
+    fun `T-F1 - une frame s ecrit en un seul appel write`() {
+        val flux = FluxCompteur()
+
+        FrameCodec.writeFrame(flux, byteArrayOf(1, 2, 3))
+
+        // Un appel d'écriture (+ le flush, hors compteur) : l'en-tête et
+        // le payload partent ENSEMBLE — contre quatre appels + payload
+        // avant T-F1.
+        assertEquals(1, flux.appels)
+    }
+
+    @Test
+    fun `T-F1 - les octets du fil sont inchanges par l ecriture groupee`() {
+        val ancien = ByteArrayOutputStream()
+        FrameCodec.writeFrame(ancien, byteArrayOf(1, 2, 3))
+        FrameCodec.writeFrame(ancien, byteArrayOf(42))
+
+        val nouveau = FluxCompteur()
+        FrameCodec.writeFrame(nouveau, byteArrayOf(1, 2, 3))
+        FrameCodec.writeFrame(nouveau, byteArrayOf(42))
+
+        assertArrayEquals(ancien.toByteArray(), nouveau.tableau())
+    }
+
+    // ---- T-F3 (Phase 2) : vidange groupée -------------------------------
+
+    @Test
+    fun `T-F3 - un groupe s ecrit en un appel et se relit frame par frame`() {
+        val flux = FluxCompteur()
+        val payloads = listOf(byteArrayOf(1), byteArrayOf(2, 2), byteArrayOf(3, 3, 3))
+
+        FrameCodec.writeFrames(flux, payloads)
+
+        assertEquals(1, flux.appels)
+        val entree = ByteArrayInputStream(flux.tableau())
+        payloads.forEach { attendu ->
+            assertArrayEquals(attendu, FrameCodec.readFrame(entree))
+        }
+    }
+
+    @Test
+    fun `T-F3 - le groupe est la concatenation exacte des frames individuelles`() {
+        val individuelles = ByteArrayOutputStream()
+        listOf(byteArrayOf(9, 8, 7), byteArrayOf(6), byteArrayOf(5, 4)).forEach {
+            FrameCodec.writeFrame(individuelles, it)
+        }
+
+        val groupe = FluxCompteur()
+        FrameCodec.writeFrames(groupe, listOf(byteArrayOf(9, 8, 7), byteArrayOf(6), byteArrayOf(5, 4)))
+
+        assertArrayEquals(individuelles.toByteArray(), groupe.tableau())
+    }
+
+    @Test
+    fun `T-F3 - un groupe vide ou un payload vide sont refuses`() {
+        val flux = ByteArrayOutputStream()
+        assertThrows(IllegalArgumentException::class.java) {
+            FrameCodec.writeFrames(flux, emptyList())
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            FrameCodec.writeFrames(flux, listOf(byteArrayOf(1), ByteArray(0)))
+        }
+    }
+
+    // ---- T-F2 (Phase 2) : lecture d'en-tête en un appel -----------------
+
+    /** Flux livrant ses octets par PETITS morceaux (réveils partiels). */
+    private class FluxMorcele(
+        private val octets: ByteArray,
+        private val tailleMorceau: Int,
+    ) : java.io.InputStream() {
+        private var curseur = 0
+
+        override fun read(): Int = if (curseur >= octets.size) -1 else octets[curseur++].toInt() and 0xFF
+
+        override fun read(
+            tampon: ByteArray,
+            depart: Int,
+            longueur: Int,
+        ): Int {
+            if (curseur >= octets.size) return -1
+            val n = minOf(longueur, tailleMorceau, octets.size - curseur)
+            System.arraycopy(octets, curseur, tampon, depart, n)
+            curseur += n
+            return n
+        }
+    }
+
+    @Test
+    fun `T-F2 - un en tete livre en morceaux se lit quand meme`() {
+        val flux = ByteArrayOutputStream()
+        FrameCodec.writeFrame(flux, byteArrayOf(7, 7, 7))
+        // Deux octets par réveil : la boucle « jusqu'à 4 » réassemble.
+        val entree = FluxMorcele(flux.toByteArray(), tailleMorceau = 2)
+
+        assertArrayEquals(byteArrayOf(7, 7, 7), FrameCodec.readFrame(entree))
+    }
+
+    @Test
+    fun `T-F2 - EOF au premier octet reste une fin de connexion propre`() {
+        // Zéro octet disponible : read(b, 0, 4) rend -1 au PREMIER appel —
+        // la sémantique d'EOF de l'ancienne lecture octet par octet tient.
+        val entree = FluxMorcele(ByteArray(0), tailleMorceau = 4)
+
+        assertThrows(EOFException::class.java) {
+            FrameCodec.readFrame(entree)
+        }
+    }
+
+    @Test
+    fun `T-F2 - EOF en plein en tete reste une frame tronquee`() {
+        // Deux octets puis fin : la valeur partielle décodée alimente
+        // l'exception, comme avant (mêmes chiffres, mêmes types).
+        val entree = FluxMorcele(byteArrayOf(0, 0), tailleMorceau = 4)
+
+        assertThrows(FrameTronqueeException::class.java) {
+            FrameCodec.readFrame(entree)
+        }
+    }
 }
