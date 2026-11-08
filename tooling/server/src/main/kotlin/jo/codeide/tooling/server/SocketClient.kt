@@ -8,7 +8,6 @@ import java.io.InputStream
 import java.io.OutputStream
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
 import java.nio.channels.SocketChannel
 import java.nio.file.Path
 import java.util.concurrent.ArrayBlockingQueue
@@ -74,10 +73,17 @@ internal class SocketClient private constructor(
     /** Âge maximal (ms) d'une frame au moment de son écriture. */
     private val ageMaxMs = AtomicLong(0L)
 
-    private val entree: InputStream = Channels.newInputStream(canal)
+    /**
+     * Entrée DIRECTE du canal (voir [CanauxBloquants]) : les fabriques
+     * `Channels` du JDK ≤ 20 tiennent `blockingLock()` pendant toute
+     * lecture native bloquante — interblocage par conception avec un fil
+     * écrivain concurrent (banc JDK 17, retour d'appareil 2026-11-07).
+     */
+    private val entree: InputStream = CanauxBloquants.entree(canal)
 
     /**
-     * Sortie brute du canal, ÉVENTUELLEMENT enveloppée d'un compteur
+     * Sortie DIRECTE du canal (voir [CanauxBloquants] — même constat
+     * d'interblocage que [entree]), ÉVENTUELLEMENT enveloppée d'un compteur
      * d'appels système (T2b — actif avec `--instru-transport` uniquement) :
      * [FrameCodec.writeFrame] écrit 4 octets d'en-tête + payload + flush ;
      * le compteur PROUVE le nombre d'appels `write` par frame au lieu de le
@@ -85,9 +91,9 @@ internal class SocketClient private constructor(
      */
     private val sortie: OutputStream =
         if (InstrumentationTransport.active) {
-            CompteurAppels(Channels.newOutputStream(canal), appelsEcriture)
+            CompteurAppels(CanauxBloquants.sortie(canal), appelsEcriture)
         } else {
-            Channels.newOutputStream(canal)
+            CanauxBloquants.sortie(canal)
         }
 
     /**
