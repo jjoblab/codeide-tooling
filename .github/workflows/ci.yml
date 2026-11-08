@@ -1,5 +1,17 @@
 # codeide-tooling — CI JVM pure (pas de SDK Android).
 # Miroir allégé de la CI CodeIDE (ADR 0037) : la chaîne complète, hors app.
+#
+# MATRICE JDK 21 + 17 (retour d'appareil du 2026-11-07) : l'orchestrateur
+# s'exécute sur l'appareil avec l'openjdk-17 du toolchain (ConfigurationBootstrap
+# côté CodeIDE). Compiler ET tester sur 17 est la seule garde contre les API
+# JDK > 17 (Thread.threadId, JDK 19, tuait l'orchestrateur au démarrage) et
+# les défauts qui ne se voient qu'en exécution 17 (interblocage
+# Channels.newInputStream/newOutputStream du JDK ≤ 20, gelé au banc). JDK 21
+# reste la référence de développement.
+#
+# Le filtre de déclenchement « branches: ain] » (corrompu depuis f158eec,
+# interprété comme un nom de branche littéral) est réparé en [main] : la CI
+# ne s'était JAMAIS déclenchée sur les poussées de main de ce dépôt.
 name: CI
 
 on:
@@ -10,15 +22,19 @@ on:
 jobs:
   verification:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        java: ['21', '17']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: JDK 21 Temurin
+      - name: JDK ${{ matrix.java }} Temurin
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '21'
+          java-version: ${{ matrix.java }}
 
       - name: Setup Gradle (cache)
         uses: gradle/actions/setup-gradle@v4
