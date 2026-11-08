@@ -6,6 +6,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /**
@@ -53,6 +54,7 @@ class InstrumentationTransportTest {
         assertTrue(resume.contains("age max 150ms"))
         assertTrue(resume.contains("2 frames, duree moy 2ms / max 3ms"))
         assertTrue(resume.contains("5 appels systeme/frame"))
+        assertTrue(resume.contains("T3b schedstat:"))
         assertTrue(resume.contains("2 reperes, ecart T0 min 20ms / moy 40ms / max 60ms"))
     }
 
@@ -77,11 +79,15 @@ class InstrumentationTransportTest {
     }
 
     @Test
-    fun `schedstat lit les fils par tid et calcule les ecarts`() {
-        // Le fil COURANT du test sert de cobaye : son schedstat existe sur
-        // les noyaux CONFIG_SCHEDSTATS (bureau et CI) — la carte peut être
-        // vide ailleurs, l'écarts reste alors silencieux (honnête).
-        val tid = Thread.currentThread().threadId()
+    fun `schedstat lit les fils par tid noyau et calcule les ecarts`() {
+        // Le fil COURANT du test sert de cobaye : son TID NOYAU ([FilNoyau])
+        // désigne une vraie entrée /proc/self/task — contrairement à
+        // l'identifiant séquentiel JVM de la Phase 1, qui ne désignait
+        // rien (sonde muette depuis l'origine). La carte peut rester vide
+        // sur un noyau sans CONFIG_SCHEDSTATS : l'écarts reste alors
+        // silencieux (honnête).
+        val tid = FilNoyau.tidCourant()
+        assumeTrue("noyau sans /proc/thread-self", tid > 0)
         val avant = Schedstat.instantanes(mapOf("fil-test" to tid))
         val apres = Schedstat.instantanes(mapOf("fil-test" to tid))
         if (avant.isNotEmpty() && apres.isNotEmpty()) {

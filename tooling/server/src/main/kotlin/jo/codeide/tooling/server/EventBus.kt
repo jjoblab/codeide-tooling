@@ -77,6 +77,11 @@ internal class EventBusSocket(
         actif = true
         consommateur =
             thread(isDaemon = true, name = "gradle-server-evenements") {
+                // T3b : auto-déclaration du TID noyau avant toute mesure —
+                // voir la note symétrique de SocketClient (règle 10).
+                if (InstrumentationTransport.active) {
+                    InstrumentationTransport.brancherTidConsommateur(FilNoyau.tidCourant())
+                }
                 try {
                     while (actif || file.isNotEmpty()) {
                         val evenement = file.poll(POLL_VIDE_MS, TimeUnit.MILLISECONDS) ?: continue

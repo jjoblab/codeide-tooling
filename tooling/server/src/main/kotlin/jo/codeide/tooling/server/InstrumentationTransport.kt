@@ -108,6 +108,14 @@ internal object InstrumentationTransport {
     /** Identifiant du fil consommateur (fourni par EventBusSocket). */
     private var idFilConsommateur = -1L
 
+    /** TID NOYAU du fil écrivain, auto-déclaré par le fil ([FilNoyau]). */
+    @Volatile
+    private var tidNoyauEcrivain = -1L
+
+    /** TID NOYAU du fil consommateur, auto-déclaré par le fil ([FilNoyau]). */
+    @Volatile
+    private var tidNoyauConsommateur = -1L
+
     // --- T3b : schedstat (temps d'attente de file d'exécution) ---
 
     /** schedstat (run, attente, tranches) par nom de fil au départ du build. */
@@ -158,7 +166,9 @@ internal object InstrumentationTransport {
         }
         Journal.info(
             "instru: build $buildId — instrumentation transport armee " +
-                "(fils: ecrivain=$idFilEcrivain, consommateur=$idFilConsommateur, schedstat=${schedstat.size} fil(s))",
+                "(jvm: ecrivain=$idFilEcrivain, consommateur=$idFilConsommateur ; " +
+                "noyau: ecrivain=$tidNoyauEcrivain, consommateur=$tidNoyauConsommateur, " +
+                "schedstat=${schedstat.size} fil(s))",
         )
     }
 
@@ -240,13 +250,33 @@ internal object InstrumentationTransport {
         }
     }
 
-    /** Mémorise les identifiants des fils mesurés (appelé au démarrage de ceux-ci). */
+    /**
+     * Mémorise les identifiants JVM des fils mesurés (T2b : ThreadMXBean) —
+     * appelé par [ServerMain] au démarrage de ceux-ci.
+     */
     fun brancherFils(
         idEcrivain: Long,
         idConsommateur: Long,
     ) {
         idFilEcrivain = idEcrivain
         idFilConsommateur = idConsommateur
+    }
+
+    /**
+     * T3b : le fil écrivain s'auto-déclare son TID noyau (première action
+     * du fil). Écrit par le fil écrivain, lu à [demarrerBuild] — bien
+     * après le démarrage, aucune course pratique.
+     */
+    fun brancherTidEcrivain(tid: Long) {
+        tidNoyauEcrivain = tid
+    }
+
+    /**
+     * T3b : le fil consommateur s'auto-déclare son TID noyau (première
+     * action du fil) — même contrat que [brancherTidEcrivain].
+     */
+    fun brancherTidConsommateur(tid: Long) {
+        tidNoyauConsommateur = tid
     }
 
     /**
@@ -313,11 +343,11 @@ internal object InstrumentationTransport {
         dernierEchantillonSeq = -1
     }
 
-    /** Étiquettes → TID des fils surveillés. */
+    /** Étiquettes → TID NOYAU des fils surveillés (auto-déclarés, [FilNoyau]). */
     private fun tids(): Map<String, Long> =
         mapOf(
-            NOM_ECRIVAIN to idFilEcrivain,
-            NOM_CONSOMMATEUR to idFilConsommateur,
+            NOM_ECRIVAIN to tidNoyauEcrivain,
+            NOM_CONSOMMATEUR to tidNoyauConsommateur,
         ).filterValues { it > 0 }
 
     /** Temps CPU (ms) du fil [tid], -1 si indisponible. */
@@ -379,9 +409,11 @@ internal object InstrumentationTransport {
 /**
  * Lecture de `/proc/self/task/<tid>/schedstat` (T3b) : temps passé sur CPU,
  * temps d'attente en file d'exécution et nombre de tranches, pour les fils
- * nommés du serveur — identifiés par TID (le noyau tronque `comm` à 15
- * caractères, ce qui rend les deux fils du transport indiscernables par
- * leur nom : « gradle-server-e… » pour les deux). Indisponible (noyau sans
+ * nommés du serveur — identifiés par leur TID NOYAU, auto-déclaré via
+ * [FilNoyau] au démarrage de chaque fil (l'identifiant séquentiel JVM ne
+ * désigne rien sous /proc ; le noyau tronque `comm` à 15 caractères, ce qui
+ * rend les deux fils du transport indiscernables par leur nom :
+ * « gradle-server-e… » pour les deux). Indisponible (noyau sans
  * `CONFIG_SCHEDSTATS`, restrictions SELinux) → carte vide, le résumé le dit
  * honnêtement.
  */

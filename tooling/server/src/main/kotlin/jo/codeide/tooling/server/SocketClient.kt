@@ -147,6 +147,12 @@ internal class SocketClient private constructor(
         actif = true
         ecrivain =
             thread(isDaemon = true, name = "gradle-server-ecrivain") {
+                // T3b : ce fil s'auto-déclare son TID noyau AVANT toute
+                // mesure — schedstat ne connaît que les tids de /proc, pas
+                // les identifiants JVM (règle 10 : rien quand c'est coupé).
+                if (InstrumentationTransport.active) {
+                    InstrumentationTransport.brancherTidEcrivain(FilNoyau.tidCourant())
+                }
                 try {
                     while (actif || fileNormale.isNotEmpty() || filePrioritaire.isNotEmpty()) {
                         ecrireProchaineFrame()
