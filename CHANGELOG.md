@@ -1,5 +1,58 @@
 # Changelog — codeide-tooling
 
+## 1.1.1 (2026-11-08)
+
+Correctifs du retour d'appareil du 2026-11-07 (CodeIDE 0.206.0, moto g06
+Android 15 / API 35) : l'orchestrateur mourait juste après le handshake —
+« arrêt sur erreur : 'long java.lang.Thread.threadId()' » (NoSuchMethodError,
+code de sortie 3, cinq relances épuisées, syncs interrompues). Le JAR 1.1.0
+était bien déployé (le drapeau `--instru-transport` était accepté et annoncé
+— le doute « ancien jar ? » du propriétaire était fondé à vérifier et est
+écarté) ; la cause vivait dans le JAR lui-même.
+
+### Trois défauts corrigés
+
+- **`threadId()` est une API JDK 19** (fb7a8de) : le toolchain installé par
+  l'app est openjdk-17 (ConfigurationBootstrap) — l'identifiant JVM des fils
+  mesurés repasse par `Thread.getId()` (même valeur, contrat ThreadMXBean
+  inchangé). La CI ne pouvait pas le voir : elle compilait et testait sur
+  JDK 21, où l'API existe.
+- **Interblocage lecture/écriture du JDK ≤ 20** (0e30649) : découvert en
+  exécutant la suite sur JDK 17 APRÈS le correctif du crash —
+  `Channels.newInputStream` tient `blockingLock()` pendant toute la lecture
+  native et `Channels.newOutputStream` l'attend avant chaque écriture : le
+  dispatcher (lecture bloquante) gelait le fil écrivain à sa première frame
+  (« orchestrateur muet »). Reproduit dans un banc minimal (dump de piles à
+  l'appui), invisible sur JDK 21 (flux réécrits). Correctif : `CanauxBloquants`,
+  flux directs `SocketChannel.read/write` répliquant le comportement JDK 21.
+  **Ce défaut était masqué par le crash précédent : les deux correctifs sont
+  nécessaires ensemble.**
+- **La sonde T3b (schedstat) était muette depuis la Phase 1** (05fd8dc) :
+  elle cherchait `/proc/self/task/<id-jvm>/schedstat` — l'identifiant
+  séquentiel JVM ne désigne rien sous /proc (vérifié : ids JVM 1, 19… contre
+  tids noyau 10529…). Chaque fil mesuré s'auto-déclare désormais son TID
+  noyau via `/proc/thread-self` (`FilNoyau`) ; le résumé de build porte enfin
+  les écarts d'attente de file d'exécution.
+
+### Observabilité et garde
+
+- **Version d'artefact observable à l'ouverture** (af0a948) : le manifest du
+  shadowJar porte `Implementation-Version` (alimenté par `version.properties`)
+  et la ligne d'ouverture devient « orchestrateur 0.50.0 (artefact 1.1.1) —
+  socket … ». Les JAR 1.0.0 et 1.1.0 ouvraient sur la même ligne : la question
+  « est-ce le nouveau jar qui tourne ? » se lit désormais dans l'export de
+  logs, sans inférence.
+- **CI : matrice JDK 21 + 17** (e13055c) et **déclencheur `branches: [main]`
+  réparé** — le filtre corrompu `ain]` (depuis f158eec) signifiait que la CI
+  ne s'était jamais déclenchée sur les poussées de main.
+
+### Vérification
+
+Chaîne complète (spotless, detekt, règles de modules, tests, shadowJar)
+verte sur JDK 21 ET JDK 17 — serveur : 18 classes, 137 tests, 0 échec sur
+les deux jambes ; smoke test du JAR sur JDK 17 : ligne d'ouverture avec
+artefact, sortie propre.
+
 ## 1.1.0 (2026-11-08)
 
 Phase 1 (instrumentation du diagnostic « retard d'affichage ») et Phase 3
