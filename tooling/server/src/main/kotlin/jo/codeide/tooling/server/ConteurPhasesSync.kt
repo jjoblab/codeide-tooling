@@ -34,6 +34,13 @@ internal class ConteurPhasesSync(
     /** Phases ouvertes (départ annoncé) → instant d'ouverture. */
     private val ouvertes = LinkedHashMap<SyncPhase, Long>()
 
+    /**
+     * Durées des phases CONCLUES (E3, Phase 2 — journal de sync serveur) :
+     * le miroir des lignes INC-44 du client se lit des deux côtés du
+     * socket (« sync … conclue : N ms — phases : … »).
+     */
+    private val conclues = LinkedHashMap<SyncPhase, Long>()
+
     /** Octets reçus cumulés des dépendances TERMINÉES. */
     private var octetsDependances = 0L
 
@@ -92,14 +99,26 @@ internal class ConteurPhasesSync(
     ) {
         synchronized(verrou) {
             val depart = ouvertes.remove(phase) ?: return
+            val dureeMs = System.currentTimeMillis() - depart
+            conclues[phase] = dureeMs
             publier(
                 phase,
                 terminee = true,
-                dureeMs = System.currentTimeMillis() - depart,
+                dureeMs = dureeMs,
                 Details(compteur = compteur),
             )
         }
     }
+
+    /**
+     * Résumé « PHASE durée ms ; … » des phases conclues (E3) — même
+     * format que la ligne client INC-44, pour que l'export de journaux
+     * se LISE pareil des deux côtés.
+     */
+    fun resumePhases(): String =
+        synchronized(verrou) {
+            conclues.entries.joinToString(" ; ") { "${it.key} ${it.value} ms" }
+        }
 
     /** Un téléchargement de dépendance traverse (fin = octets comptés) :
      *  alimente la phase DEPENDANCES — cumul, élément récent, compteur n. */

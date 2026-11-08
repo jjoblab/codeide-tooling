@@ -45,7 +45,7 @@ import java.io.IOException
  * l'autre est journalisée — le [Journal] alimente le rapport d'erreur de
  * l'opérateur (§7.5 : pas de blocage silencieux).
  */
-@Suppress("TooManyFunctions")
+@Suppress("TooManyFunctions", "LongParameterList")
 internal class MessageDispatcher(
     private val socket: SocketClient,
     private val pool: GradleConnectorPool,
@@ -55,20 +55,34 @@ internal class MessageDispatcher(
     private val scriptInitAppLog: String? = null,
     /** Métronome de diagnostic (Phase 1, §3.1c) — `null` = aucun. */
     private val metronome: MetronomeBuild? = null,
+    /**
+     * Dossier de persistance du cache de sync (E1, Phase 2) — `null` :
+     * cache mémoire seul, comportement d'avant. Déduit du répertoire du
+     * socket par [ServerMain] (répertoire privé de l'app) quand le
+     * daemon ne le fournit pas.
+     *
+     * Exemption detekt ciblée (règle 16) : LongParameterList — chaque
+     * paramètre est une PIÈCE du montage du dispatcher (transport,
+     * injection, diagnostic, persistance) fournie par [ServerMain], les
+     * regrouper en une classe « OptionsServeur » déplacerait la liste
+     * sans la réduire (même justification que `fabriquerLanceur` du
+     * build).
+     */
+    private val dossierCacheSync: java.io.File? = null,
 ) {
     /** Portée bornée des requêtes (§4.5 : jamais bloquer la lecture). */
     private val porteeRequetes = CoroutineScope(SupervisorJob() + Dispatchers.IO.limitedParallelism(PARALLELISME))
 
     private val builds = BuildHandler(pool, bus, scriptInitAppLog, socket, metronome)
-    private val cacheSync = CacheSync()
+    private val cacheSync = CacheSyncPersistant(dossierCacheSync)
     private val synchronisations = SyncHandler(pool, bus, cacheSync)
-    private val taches = TasksHandler(pool, bus, cacheSync)
+    private val taches = TasksHandler(pool, bus, cacheSync.interne)
     private val modeles = ModelHandler(pool, bus)
     private val dependances = DependenciesHandler(pool, bus)
-    private val classpaths = ClasspathHandler(pool, bus, cacheSync)
+    private val classpaths = ClasspathHandler(pool, bus, cacheSync.interne)
     private val tas = HeapMonitor(bus)
     private val scriptsBuild = BuildScriptsHandler(bus)
-    private val dependancesResolues = ResolvedDependenciesHandler(pool, bus)
+    private val dependancesResolues = ResolvedDependenciesHandler(pool, bus, cacheSync)
     private val variantesBuild = BuildVariantsHandler(bus)
 
     /** Boucle de réception — retourne à la fin de connexion. */

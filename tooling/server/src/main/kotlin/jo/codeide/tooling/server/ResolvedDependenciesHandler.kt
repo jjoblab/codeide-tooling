@@ -3,19 +3,23 @@ package jo.codeide.tooling.server
 import jo.codeide.tooling.protocol.GradleProtocol
 import jo.codeide.tooling.protocol.ResolvedDependenciesRequest
 import jo.codeide.tooling.protocol.ResolvedDependenciesResult
-import jo.codeide.tooling.protocol.ResolvedDependencyKind
-import jo.codeide.tooling.protocol.ResolvedDependencyNode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.gradle.tooling.model.idea.IdeaModule
-import org.gradle.tooling.model.idea.IdeaProject
-import org.gradle.tooling.model.idea.IdeaSingleEntryLibraryDependency
 import java.io.File
 
 /**
  * Arbre des dépendances résolues (mission Projet P4, ADR 0095) : utilise
  * le modèle `IdeaProject` de la Tooling API Gradle pour exposer
  * l'arbre des dépendances d'un module × configuration.
+ *
+ * E2 (Phase 2 — cache d'empreinte) : la sync dépose l'arbre des
+ * dépendances DIRECTES de chaque module au moment où elle résout déjà le
+ * modèle IdeaProject (extraction gratuite, [versDependances]) ; ce
+ * handler répond alors SANS re-résoudre (3,81 s bureau par requête
+ * répétée, mesuré dans l'audit) et ne touche Gradle que pour un module
+ * jamais synchronisé — auquel cas il complète le cache pour la fois
+ * suivante. La clé de fraîcheur est celle du projet ENTIER : une
+ * modification de build invalide tout, jamais un arbre périmé.
  *
  * Le modèle `IdeaProject` ne distingue pas versions demandée vs
  * retenue (c'est le rôle du rapport `dependencyInsight` — non exposé
@@ -30,21 +34,41 @@ import java.io.File
  * le modèle `ImmutableDependencies` ou une tâche Gradle dédiée
  * (`dependencyInsight --configuration <conf>`).
  */
-@Suppress("TooManyFunctions")
 internal class ResolvedDependenciesHandler(
     private val pool: GradleConnectorPool,
     private val bus: EventBus,
+    /** Cache d'empreinte (E2) — `null` : comportement d'avant (Gradle toujours). */
+    private val cache: CacheSyncPersistant? = null,
 ) {
     /** Publie [ResolvedDependenciesResult] : arbre résolu du module. */
     suspend fun resoudre(requete: ResolvedDependenciesRequest) {
         val dossier = File(requete.projectDir)
+        val depuisCache = cache?.dependancesDe(requete.projectDir, requete.module)
         val racine =
-            withContext(Dispatchers.IO) {
-                val idea = pool.connexion(dossier).model(IdeaProject::class.java).get()
-                idea.modules.all
-                    .firstOrNull { module: IdeaModule -> module.gradleProject.path == requete.module }
-                    ?.let { module -> extraireArbre(module, requete.configuration) }
-                    ?: emptyList()
+            if (depuisCache != null) {
+                // E2 : l'étiquette de configuration est celle de la REQUÊTE
+                // (l'arbre direct d'Idea ne dépend pas de la configuration).
+                depuisCache.map { it.copy(configuration = requete.configuration) }
+            } else {
+                withContext(Dispatchers.IO) {
+                    val idea =
+                        pool
+                            .connexion(dossier)
+                            .model(org.gradle.tooling.model.idea.IdeaProject::class.java)
+                            .get()
+                    idea.modules.all
+                        .firstOrNull { module -> module.gradleProject.path == requete.module }
+                        ?.versNoeudsDependances()
+                        ?: emptyList()
+                }.also { resolu ->
+                    // Premier accès hors sync : l'arbre rejoint le cache pour
+                    // les fois suivantes (SANS étiquette de configuration —
+                    // celle de la requête s'applique au moment de servir,
+                    // comme pour les arbres déposés par la sync).
+                    if (resolu.isNotEmpty()) {
+                        cache?.deposerDependances(requete.projectDir, requete.module, resolu)
+                    }
+                }.map { it.copy(configuration = requete.configuration) }
             }
         bus.publier(
             ResolvedDependenciesResult(
@@ -57,60 +81,4 @@ internal class ResolvedDependenciesHandler(
             ),
         )
     }
-
-    /** Extrait les dépendances directes d'un [module] Idea. */
-    private fun extraireArbre(
-        module: IdeaModule,
-        configuration: String,
-    ): List<ResolvedDependencyNode> =
-        module.dependencies.all
-            .map { dep -> versNoeud(dep, configuration) }
-            .toList()
-
-    /** Convertit une dépendance Idea en [ResolvedDependencyNode]. */
-    private fun versNoeud(
-        dep: org.gradle.tooling.model.idea.IdeaDependency,
-        configuration: String,
-    ): ResolvedDependencyNode =
-        when (dep) {
-            is org.gradle.tooling.model.idea.IdeaModuleDependency -> {
-                ResolvedDependencyNode(
-                    group = "",
-                    name = dep.targetModuleName ?: "",
-                    versionDemandee = "",
-                    versionRetenue = "",
-                    configuration = configuration,
-                    type = ResolvedDependencyKind.PROJECT,
-                    raison = "",
-                    transitives = emptyList(),
-                )
-            }
-
-            is IdeaSingleEntryLibraryDependency -> {
-                val moduleVersion = dep.gradleModuleVersion
-                ResolvedDependencyNode(
-                    group = moduleVersion?.group ?: "",
-                    name = moduleVersion?.name ?: "",
-                    versionDemandee = moduleVersion?.version ?: "",
-                    versionRetenue = moduleVersion?.version ?: "",
-                    configuration = configuration,
-                    type = ResolvedDependencyKind.LIBRARY,
-                    raison = "",
-                    transitives = emptyList(),
-                )
-            }
-
-            else -> {
-                ResolvedDependencyNode(
-                    group = "",
-                    name = "",
-                    versionDemandee = "",
-                    versionRetenue = "",
-                    configuration = configuration,
-                    type = ResolvedDependencyKind.FILE,
-                    raison = "",
-                    transitives = emptyList(),
-                )
-            }
-        }
 }

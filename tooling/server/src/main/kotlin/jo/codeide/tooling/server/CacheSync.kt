@@ -24,16 +24,29 @@ internal class CacheSync {
         taches: List<TacheDto>,
         modules: List<ModuleClasspathDto>,
     ) {
-        entrees[projectDir] =
-            Entree(
-                taches =
-                    taches.map { dto ->
-                        TaskInfo(path = dto.path, group = dto.group, displayName = dto.displayName)
-                    },
-                // v8 : la traduction DTO → protocole est PARTAGÉE avec le
-                // ClasspathHandler (ConversionClasspath) — plus de doublon.
-                modules = modules.map { it.versClasspathModule() },
-            )
+        deposerProtocole(
+            projectDir,
+            taches.map { dto ->
+                TaskInfo(path = dto.path, group = dto.group, displayName = dto.displayName)
+            },
+            // v8 : la traduction DTO → protocole est PARTAGÉE avec le
+            // ClasspathHandler (ConversionClasspath) — plus de doublon.
+            modules.map { it.versClasspathModule() },
+        )
+    }
+
+    /**
+     * Dépose une entrée DÉJÀ en types du protocole (E1, Phase 2) : la
+     * restitution disque du [CacheSyncPersistant] recharge l'entrée
+     * telle qu'elle fut déposée — aucun aller-retour DTO, aucune perte
+     * des champs calculés (nbJars, varianteAndroid…).
+     */
+    fun deposerProtocole(
+        projectDir: String,
+        taches: List<TaskInfo>,
+        modules: List<ClasspathModule>,
+    ) {
+        entrees[projectDir] = Entree(taches = taches, modules = modules)
     }
 
     /** Dernière entrée déposée pour [projectDir], `null` si aucune. */
