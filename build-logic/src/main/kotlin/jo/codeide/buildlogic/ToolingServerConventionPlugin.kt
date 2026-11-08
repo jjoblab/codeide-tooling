@@ -43,7 +43,16 @@ class ToolingServerConventionPlugin : Plugin<Project> {
                 archiveFileName.set(nomJar)
                 archiveClassifier.set("all")
                 archiveVersion.set("")
-                manifest.attributes(mapOf("Main-Class" to classePrincipale))
+                manifest.attributes(
+                    mapOf(
+                        "Main-Class" to classePrincipale,
+                        // Version d'ARTEFACT lisible au DÉMARRAGE du JAR
+                        // (ServerVersion.artefact) : « orchestrateur 0.50.0 »
+                        // seul ne distingue pas deux livraisons du même
+                        // niveau de protocole (constat du 2026-11-07).
+                        "Implementation-Version" to project.version.toString(),
+                    ),
+                )
                 mergeServiceFiles()
             }
 

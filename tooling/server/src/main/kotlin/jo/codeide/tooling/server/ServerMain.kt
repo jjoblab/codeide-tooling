@@ -108,7 +108,12 @@ public object ServerMain {
      */
     private fun positionnerInstrumentation(config: ServerConfig) {
         InstrumentationTransport.active = config.instrumentationTransport
-        Journal.info("orchestrateur ${ServerVersion.CURRENT} — socket ${config.cheminSocket}")
+        // Version d'ARTEFACT dès l'ouverture : la ligne dit QUEL JAR tourne,
+        // pas seulement son niveau de protocole (constat 2026-11-07 —
+        // 1.0.0 et 1.1.0 ouvraient sur la même ligne « orchestrateur
+        // 0.50.0 »). Absente en exécution de test (classpath sans manifest).
+        val artefact = ServerVersion.artefact()?.let { " (artefact $it)" } ?: ""
+        Journal.info("orchestrateur ${ServerVersion.CURRENT}$artefact — socket ${config.cheminSocket}")
         if (config.instrumentationTransport) {
             Journal.info("instru: instrumentation transport ACTIVEE (--instru-transport)")
         }
